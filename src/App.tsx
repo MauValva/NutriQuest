@@ -4,6 +4,7 @@ import NavegacaoInferior from "./components/NavegacaoInferior";
 import TelaMissoes from "./pages/TelaMissoes";
 import TelaRefeicoes from "./pages/TelaRefeicoes";
 import TelaProgresso from "./pages/TelaProgresso";
+import TelaPerfil from "./pages/TelaPerfil";
 
 function App() {
   return (
@@ -13,16 +14,7 @@ function App() {
           <Route path="/" element={<TelaMissoes />} />
           <Route path="/refeicoes" element={<TelaRefeicoes />} />
           <Route path="/progresso" element={<TelaProgresso />} />
-          <Route
-            path="/perfil"
-            element={
-              <div className="p-8 text-center text-gray-400 pt-20">
-                👤
-                <br />
-                Perfil em breve
-              </div>
-            }
-          />
+          <Route path="/perfil" element={<TelaPerfil />} />
         </Routes>
         <NavegacaoInferior />
       </BrowserRouter>
