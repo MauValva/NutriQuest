@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useApp } from "../contexts/AppContext";
+import { salvarPerfil, carregarPerfil } from "../utils/storage";
 
 type Objetivo = "emagrecer" | "manter" | "ganhar";
 
 export default function TelaPerfil() {
-  const { xpTotal, nivel, streakDias } = useApp();
+  const { xpTotal, nivel, streakDias, setNomeUsuario } = useApp();
   const [nome, setNome] = useState("Paciente");
   const [peso, setPeso] = useState("70");
   const [altura, setAltura] = useState("1.70");
@@ -12,6 +13,19 @@ export default function TelaPerfil() {
   const [objetivo, setObjetivo] = useState<Objetivo>("manter");
   const [salvando, setSalvando] = useState(false);
   const [salvo, setSalvo] = useState(false);
+
+  // Carrega perfil salvo ao abrir
+  useEffect(() => {
+    const perfil = carregarPerfil();
+    if (perfil) {
+      setNome(perfil.nome);
+      setPeso(perfil.peso);
+      setAltura(perfil.altura);
+      setIdade(perfil.idade);
+      setObjetivo(perfil.objetivo);
+      setNomeUsuario(perfil.nome);
+    }
+  }, []);
 
   const imc =
     peso && altura ? (Number(peso) / Number(altura) ** 2).toFixed(1) : null;
@@ -35,13 +49,15 @@ export default function TelaPerfil() {
 
   const caloriasDiarias = tmb ? Math.round(tmb * 1.55) : null;
 
-  function salvarPerfil() {
+  function salvarPerfilLocal() {
     setSalvando(true);
+    salvarPerfil({ nome, peso, altura, idade, objetivo });
+    setNomeUsuario(nome);
     setTimeout(() => {
       setSalvando(false);
       setSalvo(true);
       setTimeout(() => setSalvo(false), 2000);
-    }, 800);
+    }, 600);
   }
 
   const objetivos = [
@@ -52,12 +68,10 @@ export default function TelaPerfil() {
 
   return (
     <div className="min-h-screen bg-gray-50 pb-24">
-      {/* Header */}
       <div className="bg-white shadow-sm px-5 pt-12 pb-5">
         <h1 className="text-xl font-bold text-gray-800">Meu Perfil 👤</h1>
       </div>
 
-      {/* Card de stats */}
       <div className="px-4 mt-4 grid grid-cols-3 gap-3">
         {[
           { icone: "⭐", valor: xpTotal, label: "XP Total" },
@@ -75,9 +89,7 @@ export default function TelaPerfil() {
         ))}
       </div>
 
-      {/* Formulário */}
       <div className="px-4 mt-4 space-y-3">
-        {/* Nome */}
         <div className="bg-white rounded-2xl p-4 shadow-sm">
           <label className="text-xs font-bold text-gray-400 uppercase tracking-wide">
             Nome
@@ -90,7 +102,6 @@ export default function TelaPerfil() {
           />
         </div>
 
-        {/* Dados físicos */}
         <div className="bg-white rounded-2xl p-4 shadow-sm">
           <label className="text-xs font-bold text-gray-400 uppercase tracking-wide">
             Dados Físicos
@@ -131,7 +142,6 @@ export default function TelaPerfil() {
           </div>
         </div>
 
-        {/* IMC calculado */}
         {imc && (
           <div className="bg-white rounded-2xl p-4 shadow-sm">
             <label className="text-xs font-bold text-gray-400 uppercase tracking-wide">
@@ -154,7 +164,6 @@ export default function TelaPerfil() {
           </div>
         )}
 
-        {/* Objetivo */}
         <div className="bg-white rounded-2xl p-4 shadow-sm">
           <label className="text-xs font-bold text-gray-400 uppercase tracking-wide">
             Meu Objetivo
@@ -165,7 +174,7 @@ export default function TelaPerfil() {
                 key={o.tipo}
                 onClick={() => setObjetivo(o.tipo)}
                 className={`flex-1 flex flex-col items-center gap-1 py-3 rounded-xl
-                  border-2 transition-all text-sm font-medium
+                  border-2 transition-all
                   ${
                     objetivo === o.tipo
                       ? "border-green-500 bg-green-50 text-green-700"
@@ -179,12 +188,10 @@ export default function TelaPerfil() {
           </div>
         </div>
 
-        {/* Botão salvar */}
         <button
-          onClick={salvarPerfil}
-          className={`w-full font-bold py-4 rounded-2xl shadow-md
-            active:scale-95 transition-all
-            ${salvo ? "bg-green-400 text-white" : "bg-green-500 text-white"}`}
+          onClick={salvarPerfilLocal}
+          className="w-full bg-green-500 text-white font-bold py-4 rounded-2xl
+            shadow-md active:scale-95 transition-all"
         >
           {salvando ? "💾 Salvando..." : salvo ? "✓ Salvo!" : "Salvar Perfil"}
         </button>
