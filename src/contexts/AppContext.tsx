@@ -18,27 +18,26 @@ interface AppState {
 
 const AppContext = createContext<AppState>({} as AppState);
 
-export function AppProvider({ children }: { children: ReactNode }) {
-  const hoje = new Date().toISOString().split("T")[0];
+function calcularStreakInicial(): number {
+  const estadoSalvo = carregarEstado();
+  if (!estadoSalvo) return 1;
+  return calcularStreak(estadoSalvo.ultimoAcesso, estadoSalvo.streakDias);
+}
 
-  // Carrega estado salvo ou usa valores padrão
+export function AppProvider({ children }: { children: ReactNode }) {
   const estadoSalvo = carregarEstado();
 
   const [xpTotal, setXpTotal] = useState(estadoSalvo?.xpTotal ?? 0);
-  const [streakDias, setStreakDias] = useState(() => {
-    if (!estadoSalvo) return 1;
-    return calcularStreak(estadoSalvo.ultimoAcesso, estadoSalvo.streakDias);
-  });
+  const [streakDias] = useState(calcularStreakInicial);
   const [nomeUsuario, setNomeUsuario] = useState("Paciente");
 
   const nivel = Math.floor(xpTotal / 200) + 1;
 
-  // Salva automaticamente sempre que XP ou streak mudarem
   useEffect(() => {
     salvarEstado({
       xpTotal,
       streakDias,
-      ultimoAcesso: hoje,
+      ultimoAcesso: new Date().toISOString().split("T")[0],
       missoesConcluidas: [],
     });
   }, [xpTotal, streakDias]);
