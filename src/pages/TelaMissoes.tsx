@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useApp } from "../contexts/AppContext";
 import { type Missao } from "../types";
+import { salvarMissoesDoDia, carregarMissoesDoDia } from "../utils/storage";
 
-const MISSOES_INICIAIS: Missao[] = [
+const MISSOES_PADRAO: Missao[] = [
   {
     id: "1",
     icone: "💧",
@@ -51,13 +52,20 @@ const MISSOES_INICIAIS: Missao[] = [
 ];
 
 export default function TelaMissoes() {
-  const [missoes, setMissoes] = useState<Missao[]>(MISSOES_INICIAIS);
+  const [missoes, setMissoes] = useState<Missao[]>(() =>
+    carregarMissoesDoDia(MISSOES_PADRAO),
+  );
   const [celebrando, setCelebrando] = useState(false);
   const [ultimoXP, setUltimoXP] = useState(0);
   const { xpTotal, ganharXP } = useApp();
 
   const concluidas = missoes.filter((m) => m.concluida).length;
   const progresso = concluidas / missoes.length;
+
+  // Salva automaticamente sempre que missões mudarem
+  useEffect(() => {
+    salvarMissoesDoDia(missoes);
+  }, [missoes]);
 
   function concluirMissao(id: string) {
     const missao = missoes.find((m) => m.id === id);
@@ -93,7 +101,7 @@ export default function TelaMissoes() {
         </div>
       </div>
 
-      {/* Toast de celebração */}
+      {/* Toast */}
       {celebrando && (
         <div
           className="fixed top-4 left-1/2 -translate-x-1/2 z-50
@@ -104,7 +112,7 @@ export default function TelaMissoes() {
         </div>
       )}
 
-      {/* Lista de missões */}
+      {/* Lista */}
       <div className="px-4 pt-4 space-y-3">
         {missoes.map((missao) => (
           <div
@@ -141,7 +149,6 @@ export default function TelaMissoes() {
         ))}
       </div>
 
-      {/* Mensagem de conclusão total */}
       {concluidas === missoes.length && (
         <div className="mx-4 mt-4 bg-green-50 border border-green-200 rounded-2xl p-4 text-center">
           <p className="text-2xl mb-1">🏆</p>

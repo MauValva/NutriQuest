@@ -60,3 +60,15 @@ export function carregarMissoesDoDia(missoesPadrao: Missao[]): Missao[] {
   const json = localStorage.getItem("nq:missoes:" + hoje);
   return json ? JSON.parse(json) : missoesPadrao;
 }
+// ── Onboarding ────────────────────────────────────────
+export function salvarEmail(email: string): void {
+  localStorage.setItem("nq:email", email);
+}
+
+export function carregarEmail(): string | null {
+  return localStorage.getItem("nq:email");
+}
+
+export function onboardingConcluido(): boolean {
+  return !!localStorage.getItem("nq:email");
+}
