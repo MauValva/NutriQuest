@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 interface Props {
-  onConcluir: (email: string) => void;
+  onConcluir: (email: string, senha: string) => Promise<boolean>;
 }
 
 const PASSOS = [
@@ -39,27 +39,28 @@ export default function TelaOnboarding({ onConcluir }: Props) {
     if (passo < PASSOS.length) setPasso((prev) => prev + 1);
   }
 
-  function validarEmail(email: string): boolean {
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  function validarEmail(e: string): boolean {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
   }
 
-  function entrar() {
+  async function entrar() {
     if (!validarEmail(email)) {
       setErro("Digite um email válido");
       return;
     }
     if (senha.length < 4) {
-      setErro("A senha deve ter pelo menos 4 caracteres");
+      setErro("Senha muito curta");
       return;
     }
     setErro("");
     setCarregando(true);
 
-    // Simula autenticação — futuramente vai verificar no Supabase
-    setTimeout(() => {
-      setCarregando(false);
-      onConcluir(email);
-    }, 1200);
+    const sucesso = await onConcluir(email, senha);
+
+    setCarregando(false);
+    if (!sucesso) {
+      setErro("Email ou senha incorretos. Verifique com sua nutricionista.");
+    }
   }
 
   const passoAtual = PASSOS[passo];
@@ -69,13 +70,13 @@ export default function TelaOnboarding({ onConcluir }: Props) {
       className="min-h-screen bg-gradient-to-b from-green-600 to-green-400
       flex flex-col items-center justify-between px-6 py-12"
     >
-      {/* Indicadores de passo */}
+      {/* Indicadores */}
       <div className="flex gap-2 self-center mt-2">
         {PASSOS.map((_, i) => (
           <div
             key={i}
             className={`h-1.5 rounded-full transition-all duration-300
-              ${i === passo ? "w-8 bg-white" : i < passo ? "w-4 bg-white/60" : "w-4 bg-white/30"}`}
+            ${i === passo ? "w-8 bg-white" : i < passo ? "w-4 bg-white/60" : "w-4 bg-white/30"}`}
           />
         ))}
         <div
@@ -84,7 +85,6 @@ export default function TelaOnboarding({ onConcluir }: Props) {
         />
       </div>
 
-      {/* Conteúdo */}
       <div className="flex-1 flex flex-col items-center justify-center w-full">
         {!noUltimoPasso ? (
           <div className="text-center">
@@ -109,7 +109,6 @@ export default function TelaOnboarding({ onConcluir }: Props) {
             </div>
 
             <div className="space-y-3">
-              {/* Email */}
               <div>
                 <p className="text-white/70 text-xs font-medium mb-1 ml-1">
                   Email
@@ -122,18 +121,12 @@ export default function TelaOnboarding({ onConcluir }: Props) {
                     setErro("");
                   }}
                   placeholder="seu@email.com"
-                  className={`w-full bg-white/20 backdrop-blur text-white
-                    placeholder-white/40 border-2 rounded-2xl px-4 py-4
-                    outline-none transition-all
-                    ${
-                      erro && !validarEmail(email)
-                        ? "border-red-300"
-                        : "border-white/30 focus:border-white"
-                    }`}
+                  className="w-full bg-white/20 text-white placeholder-white/40
+                    border-2 border-white/30 focus:border-white rounded-2xl
+                    px-4 py-4 outline-none transition-all"
                 />
               </div>
 
-              {/* Senha */}
               <div>
                 <p className="text-white/70 text-xs font-medium mb-1 ml-1">
                   Senha{" "}
@@ -150,33 +143,26 @@ export default function TelaOnboarding({ onConcluir }: Props) {
                       setErro("");
                     }}
                     placeholder="••••••••"
-                    className={`w-full bg-white/20 backdrop-blur text-white
-                      placeholder-white/40 border-2 rounded-2xl px-4 py-4 pr-12
-                      outline-none transition-all
-                      ${
-                        erro && senha.length < 4
-                          ? "border-red-300"
-                          : "border-white/30 focus:border-white"
-                      }`}
+                    onKeyDown={(e) => e.key === "Enter" && entrar()}
+                    className="w-full bg-white/20 text-white placeholder-white/40
+                      border-2 border-white/30 focus:border-white rounded-2xl
+                      px-4 py-4 pr-12 outline-none transition-all"
                   />
                   <button
-                    onClick={() => setMostrarSenha((prev) => !prev)}
-                    className="absolute right-4 top-1/2 -translate-y-1/2
-                      text-white/60 hover:text-white text-lg transition-colors"
+                    onClick={() => setMostrarSenha((p) => !p)}
+                    className="absolute right-4 top-1/2 -translate-y-1/2 text-white/60 text-lg"
                   >
                     {mostrarSenha ? "🙈" : "👁️"}
                   </button>
                 </div>
               </div>
 
-              {/* Erro */}
               {erro && (
                 <div className="bg-red-400/30 border border-red-300/50 rounded-xl px-4 py-3">
                   <p className="text-white text-sm text-center">{erro}</p>
                 </div>
               )}
 
-              {/* Botão entrar */}
               <button
                 onClick={entrar}
                 disabled={carregando || !email || !senha}
@@ -188,12 +174,9 @@ export default function TelaOnboarding({ onConcluir }: Props) {
                       : "bg-white text-green-600"
                   }`}
               >
-                {carregando
-                  ? "🔍 Verificando acesso..."
-                  : "Entrar no NutriQuest 🚀"}
+                {carregando ? "🔍 Verificando..." : "Entrar no NutriQuest 🚀"}
               </button>
 
-              {/* Aviso */}
               <p className="text-white/50 text-xs text-center pt-2">
                 Não tem acesso? Fale com sua nutricionista.
               </p>
@@ -202,7 +185,6 @@ export default function TelaOnboarding({ onConcluir }: Props) {
         )}
       </div>
 
-      {/* Botão avançar */}
       {!noUltimoPasso && (
         <button
           onClick={avancar}

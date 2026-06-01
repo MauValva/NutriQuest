@@ -1,344 +1,454 @@
-import { useState } from "react";
-
-interface Alimento {
-  id: string;
-  nome: string;
-  porcaoGramas: number;
-  calorias: number;
-  proteinas: number;
-  carboidratos: number;
-  gorduras: number;
-}
-
-interface ItemRegistrado extends Alimento {
-  quantidadeGramas: number;
-}
-
-const ALIMENTOS: Alimento[] = [
-  {
-    id: "1",
-    nome: "Arroz branco cozido",
-    porcaoGramas: 100,
-    calorias: 130,
-    proteinas: 2.7,
-    carboidratos: 28,
-    gorduras: 0.3,
-  },
-  {
-    id: "2",
-    nome: "Feijão carioca cozido",
-    porcaoGramas: 100,
-    calorias: 76,
-    proteinas: 4.8,
-    carboidratos: 13.6,
-    gorduras: 0.5,
-  },
-  {
-    id: "3",
-    nome: "Peito de frango grelhado",
-    porcaoGramas: 100,
-    calorias: 165,
-    proteinas: 31,
-    carboidratos: 0,
-    gorduras: 3.6,
-  },
-  {
-    id: "4",
-    nome: "Ovo cozido",
-    porcaoGramas: 50,
-    calorias: 78,
-    proteinas: 6,
-    carboidratos: 0.6,
-    gorduras: 5.3,
-  },
-  {
-    id: "5",
-    nome: "Banana prata",
-    porcaoGramas: 100,
-    calorias: 89,
-    proteinas: 1.1,
-    carboidratos: 23,
-    gorduras: 0.3,
-  },
-  {
-    id: "6",
-    nome: "Batata doce cozida",
-    porcaoGramas: 100,
-    calorias: 86,
-    proteinas: 1.6,
-    carboidratos: 20,
-    gorduras: 0.1,
-  },
-  {
-    id: "7",
-    nome: "Maçã",
-    porcaoGramas: 100,
-    calorias: 52,
-    proteinas: 0.3,
-    carboidratos: 14,
-    gorduras: 0.2,
-  },
-  {
-    id: "8",
-    nome: "Leite integral",
-    porcaoGramas: 200,
-    calorias: 122,
-    proteinas: 6.4,
-    carboidratos: 9.6,
-    gorduras: 6.4,
-  },
-  {
-    id: "9",
-    nome: "Pão francês",
-    porcaoGramas: 50,
-    calorias: 134,
-    proteinas: 4.2,
-    carboidratos: 27,
-    gorduras: 0.8,
-  },
-  {
-    id: "10",
-    nome: "Iogurte natural",
-    porcaoGramas: 170,
-    calorias: 99,
-    proteinas: 5.7,
-    carboidratos: 7.7,
-    gorduras: 5.3,
-  },
-  {
-    id: "11",
-    nome: "Brócolis cozido",
-    porcaoGramas: 100,
-    calorias: 35,
-    proteinas: 2.4,
-    carboidratos: 7.2,
-    gorduras: 0.4,
-  },
-  {
-    id: "12",
-    nome: "Salmão grelhado",
-    porcaoGramas: 100,
-    calorias: 208,
-    proteinas: 20,
-    carboidratos: 0,
-    gorduras: 13,
-  },
-];
+import { useState, useEffect } from "react";
+import { useApp } from "../contexts/useApp";
+import { buscarPlanoAlimentar } from "../services/pacienteService";
 
 type TipoRefeicao = "cafe" | "almoco" | "jantar" | "lanche";
 
-const REFEICOES: { tipo: TipoRefeicao; icone: string; label: string }[] = [
-  { tipo: "cafe", icone: "☀️", label: "Café da Manhã" },
+interface ItemRefeicao {
+  nome: string;
+  quantidade: string;
+  alternativas?: string[];
+  selecionado?: number; // índice da alternativa selecionada
+}
+
+interface OpcaoRefeicao {
+  numero: number;
+  itens: ItemRefeicao[];
+  observacoes?: string;
+  concluida?: boolean;
+}
+
+interface RefeicaoPlano {
+  tipo: TipoRefeicao;
+  horario: string;
+  opcoes: OpcaoRefeicao[];
+  observacoes?: string;
+}
+
+const ABAS: { tipo: TipoRefeicao; icone: string; label: string }[] = [
+  { tipo: "cafe", icone: "🌅", label: "Café" },
   { tipo: "almoco", icone: "🍽️", label: "Almoço" },
   { tipo: "jantar", icone: "🌙", label: "Jantar" },
   { tipo: "lanche", icone: "🥪", label: "Lanche" },
 ];
 
+// Detecta alternativas no nome do item (separadas por " - ou - " ou " ou ")
+function parseItem(nomeCompleto: string): ItemRefeicao {
+  const partes = nomeCompleto.split(/ - ou - | ou /i);
+  if (partes.length > 1) {
+    return {
+      nome: partes[0].trim(),
+      quantidade: "",
+      alternativas: partes.map((p) => p.trim()),
+      selecionado: 0,
+    };
+  }
+  return { nome: nomeCompleto.trim(), quantidade: "" };
+}
+
 export default function TelaRefeicoes() {
-  const [refeicao, setRefeicao] = useState<TipoRefeicao>("almoco");
-  const [busca, setBusca] = useState("");
-  const [itens, setItens] = useState<ItemRegistrado[]>([]);
+  const { paciente } = useApp();
+  const [abaAtiva, setAbaAtiva] = useState<TipoRefeicao>("cafe");
+  const [plano, setPlano] = useState<RefeicaoPlano[]>([]);
+  const [opcaoAberta, setOpcaoAberta] = useState<number | null>(null);
+  const [carregando, setCarregando] = useState(true);
 
-  const resultados =
-    busca.length > 1
-      ? ALIMENTOS.filter((a) =>
-          a.nome.toLowerCase().includes(busca.toLowerCase()),
-        )
-      : [];
+  useEffect(() => {
+    async function carregar() {
+      try {
+        const dados = await buscarPlanoAlimentar(paciente.id);
+        if (dados.length > 0) {
+          const formatado: RefeicaoPlano[] = dados.map(
+            (r: Record<string, unknown>) => {
+              const opcoes = (r.opcoes as OpcaoRefeicao[] | null) ?? [];
+              return {
+                tipo: r.tipo as TipoRefeicao,
+                horario: r.horario as string,
+                opcoes: opcoes.map((op, idx) => ({
+                  numero: idx + 1,
+                  itens: (op.itens ?? []).map((item: ItemRefeicao) =>
+                    parseItem(item.nome),
+                  ),
+                  observacoes: op.observacoes,
+                  concluida: false,
+                })),
+                observacoes: r.observacoes as string,
+              };
+            },
+          );
+          setPlano(formatado);
+        } else {
+          setPlano(PLANO_EXEMPLO);
+        }
+      } catch {
+        setPlano(PLANO_EXEMPLO);
+      } finally {
+        setCarregando(false);
+      }
+    }
+    carregar();
+  }, [paciente.id]);
 
-  function adicionarAlimento(alimento: Alimento) {
-    setItens((prev) => [
-      ...prev,
-      { ...alimento, quantidadeGramas: alimento.porcaoGramas },
-    ]);
-    setBusca("");
+  const refeicaoAtiva = plano.find((r) => r.tipo === abaAtiva);
+
+  function toggleOpcao(index: number) {
+    setOpcaoAberta((prev) => (prev === index ? null : index));
   }
 
-  function removerItem(index: number) {
-    setItens((prev) => prev.filter((_, i) => i !== index));
-  }
-
-  function atualizarQuantidade(index: number, gramas: number) {
-    setItens((prev) =>
-      prev.map((item, i) =>
-        i === index ? { ...item, quantidadeGramas: gramas } : item,
-      ),
+  function selecionarAlternativa(
+    opcaoIdx: number,
+    itemIdx: number,
+    altIdx: number,
+  ) {
+    setPlano((prev) =>
+      prev.map((r) => {
+        if (r.tipo !== abaAtiva) return r;
+        return {
+          ...r,
+          opcoes: r.opcoes.map((op, oi) => {
+            if (oi !== opcaoIdx) return op;
+            return {
+              ...op,
+              itens: op.itens.map((item, ii) => {
+                if (ii !== itemIdx) return item;
+                return { ...item, selecionado: altIdx };
+              }),
+            };
+          }),
+        };
+      }),
     );
   }
 
-  const totais = itens.reduce(
-    (acc, item) => {
-      const f = item.quantidadeGramas / item.porcaoGramas;
-      return {
-        calorias: acc.calorias + item.calorias * f,
-        proteinas: acc.proteinas + item.proteinas * f,
-        carboidratos: acc.carboidratos + item.carboidratos * f,
-        gorduras: acc.gorduras + item.gorduras * f,
-      };
-    },
-    { calorias: 0, proteinas: 0, carboidratos: 0, gorduras: 0 },
-  );
+  function concluirOpcao(opcaoIdx: number) {
+    setPlano((prev) =>
+      prev.map((r) => {
+        if (r.tipo !== abaAtiva) return r;
+        return {
+          ...r,
+          opcoes: r.opcoes.map((op, oi) =>
+            oi === opcaoIdx ? { ...op, concluida: true } : op,
+          ),
+        };
+      }),
+    );
+    setOpcaoAberta(null);
+  }
+
+  function opcaoProntoParaConcluir(opcao: OpcaoRefeicao): boolean {
+    // Pronto se todos os itens com alternativas têm uma selecionada
+    return opcao.itens.every(
+      (item) => !item.alternativas || item.selecionado !== undefined,
+    );
+  }
+
+  if (carregando) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="text-5xl mb-3 animate-bounce">🥗</div>
+          <p className="text-gray-400 text-sm">Carregando seu plano...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 pb-24">
       {/* Header */}
       <div className="bg-white shadow-sm px-5 pt-12 pb-4">
-        <h1 className="text-xl font-bold text-gray-800 mb-4">
-          Registrar Refeição 🍽️
-        </h1>
+        <h1 className="text-xl font-bold text-gray-800 mb-4">Refeições 🍽️</h1>
 
-        {/* Seletor de refeição */}
-        <div className="flex gap-2 overflow-x-auto pb-1">
-          {REFEICOES.map((r) => (
+        {/* Abas — todas visíveis sem scroll */}
+        <div className="grid grid-cols-4 gap-1.5">
+          {ABAS.map((aba) => (
             <button
-              key={r.tipo}
-              onClick={() => setRefeicao(r.tipo)}
-              className={`flex items-center gap-1.5 px-4 py-2 rounded-full text-sm
-                font-medium whitespace-nowrap transition-all
+              key={aba.tipo}
+              onClick={() => {
+                setAbaAtiva(aba.tipo);
+                setOpcaoAberta(null);
+              }}
+              className={`flex flex-col items-center gap-0.5 py-2 px-1 rounded-xl
+                text-xs font-medium transition-all
                 ${
-                  refeicao === r.tipo
+                  abaAtiva === aba.tipo
                     ? "bg-green-500 text-white shadow-sm"
                     : "bg-gray-100 text-gray-500"
                 }`}
             >
-              {r.icone} {r.label}
+              <span className="text-lg">{aba.icone}</span>
+              <span>{aba.label}</span>
             </button>
           ))}
         </div>
       </div>
 
-      {/* Resumo de macros */}
-      <div className="px-4 pt-4 grid grid-cols-4 gap-2">
-        {[
-          {
-            label: "Kcal",
-            valor: Math.round(totais.calorias),
-            cor: "text-orange-500",
-          },
-          {
-            label: "Prot",
-            valor: Math.round(totais.proteinas) + "g",
-            cor: "text-blue-500",
-          },
-          {
-            label: "Carb",
-            valor: Math.round(totais.carboidratos) + "g",
-            cor: "text-yellow-500",
-          },
-          {
-            label: "Gord",
-            valor: Math.round(totais.gorduras) + "g",
-            cor: "text-red-400",
-          },
-        ].map((m) => (
-          <div
-            key={m.label}
-            className="bg-white rounded-2xl p-3 text-center shadow-sm"
-          >
-            <div className={`text-lg font-bold ${m.cor}`}>{m.valor}</div>
-            <div className="text-xs text-gray-400 mt-0.5">{m.label}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Busca */}
-      <div className="px-4 mt-4 relative">
-        <input
-          value={busca}
-          onChange={(e) => setBusca(e.target.value)}
-          placeholder="🔍  Buscar alimento..."
-          className="w-full bg-white rounded-2xl px-4 py-3 shadow-sm border
-            border-gray-200 outline-none focus:border-green-400 text-sm"
-        />
-
-        {/* Resultados da busca */}
-        {resultados.length > 0 && (
-          <div
-            className="absolute left-4 right-4 bg-white rounded-2xl shadow-lg
-            border border-gray-100 mt-1 z-10 overflow-hidden"
-          >
-            {resultados.map((a) => (
-              <button
-                key={a.id}
-                onClick={() => adicionarAlimento(a)}
-                className="w-full px-4 py-3 text-left hover:bg-green-50
-                  border-b border-gray-50 last:border-0 flex justify-between items-center"
-              >
-                <span className="text-sm font-medium text-gray-700">
-                  {a.nome}
-                </span>
-                <span className="text-xs text-gray-400">{a.calorias} kcal</span>
-              </button>
-            ))}
+      <div className="px-4 pt-4">
+        {/* Horário */}
+        {refeicaoAtiva && (
+          <div className="bg-green-600 text-white rounded-2xl px-5 py-3 mb-4 text-center">
+            <p className="font-bold text-lg">
+              {refeicaoAtiva.horario} —{" "}
+              {ABAS.find((a) => a.tipo === abaAtiva)?.label}
+            </p>
           </div>
         )}
-      </div>
 
-      {/* Lista de itens registrados */}
-      <div className="px-4 mt-4 space-y-2">
-        {itens.length === 0 && (
-          <div className="text-center text-gray-300 py-8">
+        {/* Sem plano */}
+        {!refeicaoAtiva && (
+          <div className="text-center py-12 text-gray-300">
             <p className="text-4xl mb-2">🥗</p>
-            <p className="text-sm">Busque e adicione alimentos acima</p>
+            <p className="text-sm">
+              Nenhuma opção cadastrada para esta refeição
+            </p>
           </div>
         )}
 
-        {itens.map((item, index) => {
-          const f = item.quantidadeGramas / item.porcaoGramas;
-          const cal = Math.round(item.calorias * f);
-          return (
-            <div
-              key={index}
-              className="bg-white rounded-2xl px-4 py-3 shadow-sm"
-            >
-              <div className="flex justify-between items-start">
-                <div className="flex-1">
-                  <p className="font-medium text-gray-800 text-sm">
-                    {item.nome}
-                  </p>
-                  <p className="text-orange-500 text-xs font-bold mt-0.5">
-                    {cal} kcal
-                  </p>
-                </div>
-                <button
-                  onClick={() => removerItem(index)}
-                  className="text-gray-300 hover:text-red-400 text-lg ml-2 transition-colors"
-                >
-                  ✕
-                </button>
-              </div>
-              <div className="flex items-center gap-2 mt-2">
-                <input
-                  type="number"
-                  value={item.quantidadeGramas}
-                  onChange={(e) =>
-                    atualizarQuantidade(index, Number(e.target.value))
-                  }
-                  className="w-20 border border-gray-200 rounded-lg px-2 py-1
-                    text-sm text-center outline-none focus:border-green-400"
-                />
-                <span className="text-xs text-gray-400">gramas</span>
-              </div>
-            </div>
-          );
-        })}
-      </div>
+        {/* Lista de opções */}
+        <div className="space-y-3">
+          {refeicaoAtiva?.opcoes.map((opcao, opcaoIdx) => {
+            const aberta = opcaoAberta === opcaoIdx;
+            const pronta = opcaoProntoParaConcluir(opcao);
 
-      {/* Botão salvar */}
-      {itens.length > 0 && (
-        <div className="px-4 mt-4">
-          <button
-            onClick={() => {
-              setItens([]);
-              alert("Refeição salva! +25 XP 🎉");
-            }}
-            className="w-full bg-green-500 text-white font-bold py-4 rounded-2xl
-              shadow-md active:scale-95 transition-all"
-          >
-            Salvar Refeição — {Math.round(totais.calorias)} kcal
-          </button>
+            return (
+              <div
+                key={opcaoIdx}
+                className={`bg-white rounded-2xl shadow-sm overflow-hidden
+                  border-2 transition-all
+                  ${
+                    opcao.concluida
+                      ? "border-green-400"
+                      : aberta
+                        ? "border-green-300"
+                        : "border-transparent"
+                  }`}
+              >
+                {/* Cabeçalho da opção */}
+                <button
+                  onClick={() => toggleOpcao(opcaoIdx)}
+                  className="w-full flex items-center justify-between px-5 py-4"
+                >
+                  <div className="flex items-center gap-3">
+                    {opcao.concluida && (
+                      <span
+                        className="w-6 h-6 rounded-full bg-green-500
+                        flex items-center justify-center text-white text-xs font-bold"
+                      >
+                        ✓
+                      </span>
+                    )}
+                    <span className="font-semibold text-gray-800">
+                      Opção {opcao.numero}
+                    </span>
+                    {opcao.concluida && (
+                      <span className="text-xs text-green-600 font-medium">
+                        Feita!
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-gray-400 text-lg">
+                    {aberta ? "∨" : ">"}
+                  </span>
+                </button>
+
+                {/* Conteúdo expandido */}
+                {aberta && (
+                  <div className="px-5 pb-5">
+                    <div className="space-y-3 mb-4">
+                      {opcao.itens.map((item, itemIdx) => (
+                        <div key={itemIdx}>
+                          {item.alternativas ? (
+                            // Item com alternativas — seleção
+                            <div>
+                              <p className="text-xs text-gray-400 mb-1.5 font-medium">
+                                Escolha uma opção:
+                              </p>
+                              <div className="space-y-1.5">
+                                {item.alternativas.map((alt, altIdx) => (
+                                  <button
+                                    key={altIdx}
+                                    onClick={() =>
+                                      selecionarAlternativa(
+                                        opcaoIdx,
+                                        itemIdx,
+                                        altIdx,
+                                      )
+                                    }
+                                    className={`w-full text-left px-3 py-2 rounded-xl
+                                      text-sm border-2 transition-all
+                                      ${
+                                        item.selecionado === altIdx
+                                          ? "border-green-500 bg-green-50 text-green-800 font-medium"
+                                          : "border-gray-100 bg-gray-50 text-gray-600"
+                                      }`}
+                                  >
+                                    {item.selecionado === altIdx && "✓ "}
+                                    {alt}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          ) : (
+                            // Item simples
+                            <div className="flex items-start gap-2">
+                              <span className="text-green-500 mt-0.5 flex-shrink-0">
+                                •
+                              </span>
+                              <p className="text-sm text-gray-700">
+                                {item.nome}
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Observações */}
+                    {opcao.observacoes && (
+                      <div
+                        className="bg-amber-50 border border-amber-200
+                        rounded-xl px-3 py-2 mb-4"
+                      >
+                        <p className="text-xs text-amber-700">
+                          💡 {opcao.observacoes}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Botão Fiz essa! */}
+                    <button
+                      onClick={() =>
+                        pronta && !opcao.concluida && concluirOpcao(opcaoIdx)
+                      }
+                      disabled={!pronta || opcao.concluida}
+                      className={`w-full py-3.5 rounded-xl font-bold text-sm
+                        transition-all active:scale-95
+                        ${
+                          opcao.concluida
+                            ? "bg-green-100 text-green-600 cursor-default"
+                            : pronta
+                              ? "bg-green-500 text-white shadow-md"
+                              : "bg-gray-100 text-gray-400 cursor-not-allowed"
+                        }`}
+                    >
+                      {opcao.concluida
+                        ? "✓ Refeição confirmada!"
+                        : pronta
+                          ? "Fiz essa! ✅"
+                          : "Selecione as opções acima"}
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
-      )}
+      </div>
     </div>
   );
 }
+
+// Plano exemplo para quando não há dados no banco
+const PLANO_EXEMPLO: RefeicaoPlano[] = [
+  {
+    tipo: "cafe",
+    horario: "06:30",
+    opcoes: [
+      {
+        numero: 1,
+        itens: [
+          parseItem(
+            "Leite desnatado (200ml) - ou - Leite em pó desnatado 2 col. sopa (20g)",
+          ),
+          parseItem("Pão integral - 1 Fat. (25g)"),
+          parseItem("Requeijão light (20g) - ou - Creme de ricota light (25g)"),
+          parseItem("Queijo muçarela - 1 Fat. (20g)"),
+          parseItem("Fruta - 1 Porção"),
+        ],
+        concluida: false,
+      },
+      {
+        numero: 2,
+        itens: [
+          parseItem(
+            "Leite longa vida desnatado (200ml) - ou - Leite em pó desnatado (20g)",
+          ),
+          parseItem("Banana - 1 Unid. média (75g)"),
+          parseItem("Aveia em flocos finos - 2 Col. de sopa (20g)"),
+          parseItem("Whey Protein concentrado - 1.5 Col. de sopa (15g)"),
+        ],
+        concluida: false,
+      },
+    ],
+  },
+  {
+    tipo: "almoco",
+    horario: "12:30",
+    opcoes: [
+      {
+        numero: 1,
+        itens: [
+          parseItem(
+            "Arroz branco (80g) - ou - Arroz integral (120g) - ou - Batata doce (100g)",
+          ),
+          parseItem(
+            "Peito de frango (100g) - ou - Carne bovina magra (100g) - ou - Filé de peixe (100g)",
+          ),
+          parseItem("Feijão cozido - 1/2 concha (100g)"),
+          parseItem("Salada, verdura, legumes (120g)"),
+        ],
+        observacoes: "Tempere a salada com vinagre ou limão e sal. Sem azeite.",
+        concluida: false,
+      },
+    ],
+  },
+  {
+    tipo: "lanche",
+    horario: "16:30",
+    opcoes: [
+      {
+        numero: 1,
+        itens: [
+          parseItem("Pão integral - 2 Fat. (50g)"),
+          parseItem("Peito de frango (40g) - ou - Sardinha em óleo (40g)"),
+          parseItem(
+            "Requeijão light (30g) - ou - Creme de ricota light (37g) - ou - Maionese light (22g)",
+          ),
+          parseItem("Fruta - 1 Porção"),
+        ],
+        observacoes:
+          "Sugestão: Faça um sanduíche com tomate e salada de folhas.",
+        concluida: false,
+      },
+      {
+        numero: 2,
+        itens: [
+          parseItem("Yopro Bebida Láctea 250ml"),
+          parseItem("Fruta - 1 Porção"),
+          parseItem("Aveia em flocos finos - 2 Col. de sopa (20g)"),
+        ],
+        concluida: false,
+      },
+    ],
+  },
+  {
+    tipo: "jantar",
+    horario: "19:30",
+    opcoes: [
+      {
+        numero: 1,
+        itens: [
+          parseItem("Wrap integral - 1 Unid."),
+          parseItem(
+            "Peito de frango (100g) - ou - Carne bovina (100g) - ou - Atum ao natural",
+          ),
+          parseItem("Requeijão light (30g) - ou - Creme de ricota light (37g)"),
+          parseItem("Salada, verdura, legumes (120g)"),
+        ],
+        observacoes:
+          "Sugestão: Wrap com pastinha de proteína ou pizza de wrap.",
+        concluida: false,
+      },
+    ],
+  },
+];

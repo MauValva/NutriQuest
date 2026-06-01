@@ -1,9 +1,14 @@
 import * as pdfjsLib from "pdfjs-dist";
-import pdfWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
+pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+  "pdfjs-dist/build/pdf.worker.min.mjs",
+  import.meta.url,
+).toString();
 
-// Extrai todo o texto de um PDF
+const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
+const GROQ_API_KEY = import.meta.env.VITE_GROQ_API_KEY;
+
+// ── Extrai texto bruto do PDF ─────────────────────────
 export async function extrairTextoPDF(arquivo: File): Promise<string> {
   const arrayBuffer = await arquivo.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
@@ -13,7 +18,9 @@ export async function extrairTextoPDF(arquivo: File): Promise<string> {
     const pagina = await pdf.getPage(i);
     const conteudo = await pagina.getTextContent();
     const textoPagina = conteudo.items
-      .map((item: Record<string, unknown>) => ("str" in item ? item.str : ""))
+      .map((item: Record<string, unknown>) =>
+        typeof item["str"] === "string" ? item["str"] : "",
+      )
       .join(" ");
     textoCompleto += textoPagina + "\n";
   }
@@ -21,257 +28,208 @@ export async function extrairTextoPDF(arquivo: File): Promise<string> {
   return textoCompleto;
 }
 
-// Extrai dados da anamnese
-export function extrairDadosAnamnese(texto: string) {
-  const extrair = (padrao: RegExp) => {
-    const match = texto.match(padrao);
-    return match ? match[1].trim() : "";
-  };
+// ── Chama o Groq com um prompt ──────────────────────
+async function chamarGroq(prompt: string): Promise<string> {
+  const response = await fetch(GROQ_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${GROQ_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: "llama-3.3-70b-versatile",
+      max_tokens: 1500,
+      temperature: 0.1,
+      messages: [
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
+    }),
+  });
 
-  const nome = extrair(/Nome do paciente:\s*(.+?)(?:\n|$)/i);
+  const data = await response.json();
 
-  const alturaStr = extrair(/Qual a sua altura\?\s*[\d*]\s*([\d.,]+)/i);
-  const altura = alturaStr ? parseFloat(alturaStr.replace(",", ".")) : 0;
+  if (!response.ok) {
+    console.error("Erro Groq:", data);
+    throw new Error(data?.error?.message ?? `Erro HTTP ${response.status}`);
+  }
 
-  const pesoStr = extrair(/Qual o seu peso atual\?\s*[\d*]\s*([\d.,]+)/i);
-  const peso = pesoStr ? parseFloat(pesoStr.replace(",", ".")) : 0;
-
-  // Detectar dificuldades para priorizar missões
-  const textoLower = texto.toLowerCase();
-
-  const dificuldades = {
-    agua:
-      textoLower.includes("água") &&
-      (textoLower.includes("pouc") ||
-        textoLower.includes("1-3") ||
-        textoLower.includes("dificuldade") ||
-        textoLower.includes("esqueç")),
-    refeicoes:
-      textoLower.includes("regrar") ||
-      textoLower.includes("mais vezes") ||
-      textoLower.includes("quantidade") ||
-      textoLower.includes("qualidade"),
-    tempo: textoLower.includes("tempo") && textoLower.includes("dificuldade"),
-    atividade:
-      textoLower.includes("sedentári") ||
-      textoLower.includes("não pratica") ||
-      textoLower.includes("nao pratica"),
-  };
-
-  const objetivo = textoLower.includes("emagrec")
-    ? "emagrecer"
-    : textoLower.includes("ganho de massa") ||
-        textoLower.includes("massa muscular")
-      ? "ganhar"
-      : "manter";
-
-  const alimento_favorito = extrair(/favorito\?\s*[\d*]\s*(.+?)(?:\n|$)/i);
-  const nao_come = extrair(
-    /não come de jeito nenhum\?\s*[\d*]\s*(.+?)(?:\n|$)/i,
-  );
-  const atividade_fisica = extrair(
-    /atividade física\?\s*[\d*]\s*(.+?)(?:\n|$)/i,
-  );
-  const ingestao_agua = extrair(
-    /ingestão diária de água[^?]*\?\s*[^0-9]*([0-9-]+)/i,
-  );
-
-  return {
-    nome,
-    peso,
-    altura,
-    objetivo: objetivo as "emagrecer" | "manter" | "ganhar",
-    dificuldades,
-    alimento_favorito,
-    nao_come,
-    atividade_fisica,
-    ingestao_agua,
-    texto_completo: texto,
-  };
+  return data.choices?.[0]?.message?.content ?? "";
 }
 
-// Gera missões personalizadas com base na anamnese
-export function gerarMissoesSugeridas(
+// ── Lê anamnese com IA ────────────────────────────────
+export async function extrairDadosAnamneseComIA(texto: string) {
+  const prompt = `Você é um assistente especializado em nutrição clínica.
+Analise o texto abaixo de uma anamnese nutricional e extraia as informações estruturadas.
+O texto pode vir de qualquer software de nutrição (Webdiet, Dietbox, NutriSoft, etc).
+Responda APENAS com JSON válido, sem markdown, sem texto adicional.
+
+TEXTO DA ANAMNESE:
+${texto.slice(0, 3000)}
+
+Retorne exatamente neste formato:
+{
+  "nome": "nome completo do paciente",
+  "peso": 70,
+  "altura": 1.70,
+  "idade": 30,
+  "objetivo": "emagrecer",
+  "dificuldades": {
+    "agua": false,
+    "refeicoes": false,
+    "tempo": false,
+    "atividade": false
+  },
+  "alimento_favorito": "",
+  "nao_come": "",
+  "atividade_fisica": "",
+  "ingestao_agua": "",
+  "observacoes_relevantes": ""
+}
+
+Regras importantes:
+- nome: nome completo conforme aparece no documento
+- peso: número em kg (ex: 70), sem unidade
+- altura: número em metros com decimais (ex: 1.58), sem unidade
+- idade: número inteiro, 0 se não encontrado
+- objetivo: "emagrecer" se quer perder peso/gordura, "ganhar" se quer massa muscular/hipertrofia, "manter" nos demais casos
+- dificuldades.agua: true se bebe menos de 2L por dia OU menciona dificuldade com hidratação
+- dificuldades.refeicoes: true se tem dificuldade de regularidade, pula refeições ou não sabe as quantidades certas
+- dificuldades.tempo: true se menciona falta de tempo como dificuldade cotidiana
+- dificuldades.atividade: true se é sedentário ou não pratica nenhuma atividade física
+- alimento_favorito: alimento favorito/indispensável mencionado
+- nao_come: alimento que não come de jeito nenhum
+- atividade_fisica: descreva a atividade e frequência mencionadas
+- ingestao_agua: quanto bebe de água por dia conforme relatado
+- observacoes_relevantes: resumo em 1 frase das principais informações clínicas (diagnósticos, medicamentos, restrições)`;
+
+  const resposta = await chamarGroq(prompt);
+
+  try {
+    const limpo = resposta.replace(/```json|```/g, "").trim();
+    return JSON.parse(limpo);
+  } catch {
+    console.error("Erro ao parsear resposta do Groq:", resposta);
+    return null;
+  }
+}
+
+// ── Gera missões personalizadas com IA ────────────────
+export async function gerarMissoesComIA(
   pacienteId: string,
-  dados: ReturnType<typeof extrairDadosAnamnese>,
-) {
-  const missoes = [];
+  dadosAnamnese: Record<string, unknown>,
+  textoBruto: string,
+): Promise<MissaoGerada[]> {
+  const prompt = `Você é uma nutricionista experiente criando missões gamificadas para engajar pacientes.
+Com base na anamnese abaixo, crie missões diárias personalizadas no estilo Duolingo.
+Responda APENAS com JSON válido, sem markdown, sem texto adicional.
 
-  // Missões de hidratação — prioridade alta se bebe pouco
-  const prioridadeAgua = dados.dificuldades.agua ? 9 : 6;
+DADOS DO PACIENTE:
+${JSON.stringify(dadosAnamnese, null, 2)}
 
-  missoes.push({
-    paciente_id: pacienteId,
-    titulo: "Copo de água ao acordar",
-    descricao: "Beba um copo cheio de água logo ao acordar, antes do café",
-    tipo: "hidratacao" as const,
-    icone: "💧",
-    xp_recompensa: 15,
-    prioridade: prioridadeAgua,
-    aprovada_nutri: false,
-    ativa: true,
-  });
+TRECHOS RELEVANTES DA ANAMNESE:
+${textoBruto.slice(0, 1500)}
 
-  missoes.push({
-    paciente_id: pacienteId,
-    titulo: "Meta de água diária",
-    descricao: "Complete o consumo mínimo de 2,5L de água ao longo do dia",
-    tipo: "hidratacao" as const,
-    icone: "🥤",
-    xp_recompensa: dados.dificuldades.agua ? 35 : 20,
-    prioridade: prioridadeAgua,
-    aprovada_nutri: false,
-    ativa: true,
-  });
+Crie entre 6 e 8 missões personalizadas. Retorne um array JSON:
+[
+  {
+    "titulo": "título curto e motivador",
+    "descricao": "instrução clara e específica para este paciente",
+    "tipo": "hidratacao",
+    "icone": "💧",
+    "xp_recompensa": 15,
+    "prioridade": 8
+  }
+]
 
-  // Missões de alimentação
-  const prioridadeRefeicao = dados.dificuldades.refeicoes ? 9 : 6;
+Regras:
+- tipo: apenas "hidratacao", "alimentacao", "atividade" ou "educacional"
+- icone: emoji relevante para a missão
+- xp_recompensa: entre 10 e 40 XP, mais difícil = mais XP
+- prioridade: entre 1 e 10, baseada nas dificuldades do paciente (dificuldades detectadas = prioridade alta)
+- Personalize as missões com base nas dificuldades reais do paciente
+- Se bebe pouco água: priorize missões de hidratação com xp alto
+- Se tem dificuldade com refeições: priorize registro e regularidade
+- Se pratica musculação: inclua missão de alimentação pós-treino
+- Se tem pouco tempo: sugira missões práticas e rápidas
+- Inclua pelo menos 1 missão educacional
+- Use linguagem motivadora e direta, como um coach`;
 
-  missoes.push({
-    paciente_id: pacienteId,
-    titulo: "Registrar café da manhã",
-    descricao: "Registre o que comeu no café da manhã no app",
-    tipo: "alimentacao" as const,
-    icone: "☀️",
-    xp_recompensa: 20,
-    prioridade: prioridadeRefeicao,
-    aprovada_nutri: false,
-    ativa: true,
-  });
+  const resposta = await chamarGroq(prompt);
 
-  missoes.push({
-    paciente_id: pacienteId,
-    titulo: "Seguir o plano no almoço",
-    descricao: "Siga as opções do plano alimentar no almoço de hoje",
-    tipo: "alimentacao" as const,
-    icone: "🍽️",
-    xp_recompensa: 25,
-    prioridade: prioridadeRefeicao,
-    aprovada_nutri: false,
-    ativa: true,
-  });
+  try {
+    const limpo = resposta.replace(/```json|```/g, "").trim();
+    const missoes = JSON.parse(limpo) as MissaoGerada[];
 
-  missoes.push({
-    paciente_id: pacienteId,
-    titulo: "Incluir proteína nas refeições",
-    descricao: "Garanta proteína em pelo menos 3 refeições hoje",
-    tipo: "alimentacao" as const,
-    icone: "🥩",
-    xp_recompensa: 25,
-    prioridade: dados.objetivo === "ganhar" ? 10 : 7,
-    aprovada_nutri: false,
-    ativa: true,
-  });
-
-  missoes.push({
-    paciente_id: pacienteId,
-    titulo: "Prato colorido",
-    descricao: "Inclua pelo menos 3 cores de vegetais ou frutas hoje",
-    tipo: "alimentacao" as const,
-    icone: "🥗",
-    xp_recompensa: 20,
-    prioridade: 7,
-    aprovada_nutri: false,
-    ativa: true,
-  });
-
-  // Missão de atividade
-  if (!dados.dificuldades.atividade) {
-    missoes.push({
+    return missoes.map((m) => ({
+      ...m,
       paciente_id: pacienteId,
-      titulo: "Alimentação pós-treino",
-      descricao:
-        "Consuma proteína até 1h após o treino para recuperação muscular",
-      tipo: "atividade" as const,
-      icone: "💪",
-      xp_recompensa: 30,
-      prioridade: dados.objetivo === "ganhar" ? 10 : 8,
       aprovada_nutri: false,
       ativa: true,
-    });
+    }));
+  } catch {
+    console.error("Erro ao parsear missões do Groq:", resposta);
+    return [];
   }
-
-  // Missão educacional
-  missoes.push({
-    paciente_id: pacienteId,
-    titulo: "Dica do dia",
-    descricao: "Leia a dica nutricional do dia no app",
-    tipo: "educacional" as const,
-    icone: "📚",
-    xp_recompensa: 10,
-    prioridade: 5,
-    aprovada_nutri: false,
-    ativa: true,
-  });
-
-  // Ordenar por prioridade
-  return missoes.sort((a, b) => b.prioridade - a.prioridade);
 }
 
-// Extrai refeições do plano alimentar
-export function extrairRefeicoes(texto: string) {
-  const refeicoes = [];
+export interface MissaoGerada {
+  paciente_id: string;
+  titulo: string;
+  descricao: string;
+  tipo: "hidratacao" | "alimentacao" | "atividade" | "educacional";
+  icone: string;
+  xp_recompensa: number;
+  prioridade: number;
+  aprovada_nutri: boolean;
+  ativa: boolean;
+  id?: string;
+}
 
-  const blocos = [
-    {
-      tipo: "cafe",
-      padrao: /café da manhã(.*?)(?=\d{2}:\d{2}|$)/is,
-      horario: "06:30",
-    },
-    {
-      tipo: "almoco",
-      padrao: /almoço(.*?)(?=sobremesa|\d{2}:\d{2}|$)/is,
-      horario: "12:30",
-    },
-    {
-      tipo: "lanche",
-      padrao: /lanche da tarde(.*?)(?=\d{2}:\d{2}|$)/is,
-      horario: "16:30",
-    },
-    {
-      tipo: "jantar",
-      padrao: /jantar(.*?)(?=\d{2}:\d{2}|$)/is,
-      horario: "19:30",
-    },
-  ];
+// ── Extrai refeições do plano alimentar com IA ────────
+export async function extrairRefeicoesComIA(texto: string) {
+  const prompt = `Você é um assistente de nutrição.
+Analise o texto abaixo de um plano alimentar e extraia as refeições estruturadas.
+O texto pode vir de qualquer software (Webdiet, Dietbox, etc).
+Responda APENAS com JSON válido, sem markdown.
 
-  for (const bloco of blocos) {
-    const match = texto.match(bloco.padrao);
-    if (match) {
-      const textoBloco = match[1];
+TEXTO DO PLANO:
+${texto.slice(0, 8000)}
 
-      // Extrai horário se existir no texto
-      const horarioMatch = texto.match(
-        new RegExp(
-          `(\\d{2}:\\d{2}).*?${bloco.tipo === "cafe" ? "café" : bloco.tipo}`,
-          "i",
-        ),
-      );
-      const horario = horarioMatch ? horarioMatch[1] : bloco.horario;
-
-      // Extrai itens (linhas com bullet •)
-      const itens = textoBloco
-        .split("\n")
-        .filter((l) => l.includes("•") || l.trim().startsWith("-"))
-        .map((l) => l.replace(/[•-]/g, "").trim())
-        .filter((l) => l.length > 5)
-        .slice(0, 8);
-
-      if (itens.length > 0) {
-        refeicoes.push({
-          tipo: bloco.tipo,
-          horario,
-          opcoes: [
-            {
-              numero: 1,
-              itens: itens.map((nome) => ({ nome, quantidade: "" })),
-            },
-          ],
-          observacoes: "",
-        });
+Retorne um array de refeições:
+[
+  {
+    "tipo": "cafe",
+    "horario": "06:30",
+    "opcoes": [
+      {
+        "numero": 1,
+        "itens": [
+          { "nome": "Leite desnatado", "quantidade": "200ml" },
+          { "nome": "Pão integral", "quantidade": "1 fatia (25g)" }
+        ],
+        "observacoes": "opcional"
       }
-    }
+    ],
+    "observacoes": "observações gerais da refeição"
   }
+]
 
-  return refeicoes;
+Regras:
+- tipo: apenas "cafe", "almoco", "lanche" ou "jantar"
+- Inclua todas as opções de cada refeição (Opção 1, Opção 2, etc)
+- horario: no formato HH:MM
+- Se não encontrar o horário, use: cafe=06:30, almoco=12:00, lanche=15:30, jantar=19:30`;
+
+  const resposta = await chamarGroq(prompt);
+
+  try {
+    const limpo = resposta.replace(/```json|```/g, "").trim();
+    return JSON.parse(limpo);
+  } catch {
+    console.error("Erro ao parsear refeições do Groq:", resposta);
+    return [];
+  }
 }

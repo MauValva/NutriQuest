@@ -1,200 +1,147 @@
-import { useState, useEffect } from "react";
-import { useApp } from "../contexts/AppContext";
-import { salvarPerfil, carregarPerfil } from "../utils/storage";
-
-type Objetivo = "emagrecer" | "manter" | "ganhar";
+import { useApp } from "../contexts/useApp";
+import { carregarPerfil } from "../utils/storage";
 
 export default function TelaPerfil() {
-  const { xpTotal, nivel, streakDias, setNomeUsuario } = useApp();
-  const [nome, setNome] = useState("Paciente");
-  const [peso, setPeso] = useState("70");
-  const [altura, setAltura] = useState("1.70");
-  const [idade, setIdade] = useState("30");
-  const [objetivo, setObjetivo] = useState<Objetivo>("manter");
-  const [salvando, setSalvando] = useState(false);
-  const [salvo, setSalvo] = useState(false);
+  const { xpTotal, nivel, streakDias, paciente } = useApp();
+  const perfil = carregarPerfil();
 
-  // Carrega perfil salvo ao abrir
-  useEffect(() => {
-    const perfil = carregarPerfil();
-    if (perfil) {
-      setNome(perfil.nome);
-      setPeso(perfil.peso);
-      setAltura(perfil.altura);
-      setIdade(perfil.idade);
-      setObjetivo(perfil.objetivo);
-      setNomeUsuario(perfil.nome);
-    }
-  }, []);
+  const nome = perfil?.nome ?? paciente.nome;
+  const email = paciente.email;
+  const peso = perfil?.peso ?? paciente.peso ?? "";
+  const altura = perfil?.altura ?? paciente.altura ?? "";
 
-  const imc =
-    peso && altura ? (Number(peso) / Number(altura) ** 2).toFixed(1) : null;
-
-  const classificacaoIMC = (imc: number) => {
-    if (imc < 18.5) return { texto: "Abaixo do peso", cor: "text-blue-500" };
-    if (imc < 25) return { texto: "Peso normal ✓", cor: "text-green-500" };
-    if (imc < 30) return { texto: "Sobrepeso", cor: "text-yellow-500" };
-    return { texto: "Obesidade", cor: "text-red-500" };
+  const objetivoConfig = {
+    emagrecer: {
+      icone: "📉",
+      titulo: "Emagrecimento",
+      desc: "Seu foco é perder gordura corporal com saúde e disposição.",
+      cor: "from-blue-500 to-blue-600",
+      bg: "bg-blue-50",
+      texto: "text-blue-700",
+    },
+    ganhar: {
+      icone: "💪",
+      titulo: "Ganho de Massa",
+      desc: "Seu foco é construir massa muscular com nutrição de qualidade.",
+      cor: "from-orange-500 to-orange-600",
+      bg: "bg-orange-50",
+      texto: "text-orange-700",
+    },
+    manter: {
+      icone: "⚖️",
+      titulo: "Manutenção",
+      desc: "Seu foco é manter o peso atual com hábitos alimentares equilibrados.",
+      cor: "from-green-500 to-green-600",
+      bg: "bg-green-50",
+      texto: "text-green-700",
+    },
   };
 
-  const tmb =
-    peso && altura && idade
-      ? Math.round(
-          10 * Number(peso) +
-            6.25 * Number(altura) * 100 -
-            5 * Number(idade) +
-            5,
-        )
-      : null;
-
-  const caloriasDiarias = tmb ? Math.round(tmb * 1.55) : null;
-
-  function salvarPerfilLocal() {
-    setSalvando(true);
-    salvarPerfil({ nome, peso, altura, idade, objetivo });
-    setNomeUsuario(nome);
-    setTimeout(() => {
-      setSalvando(false);
-      setSalvo(true);
-      setTimeout(() => setSalvo(false), 2000);
-    }, 600);
-  }
-
-  const objetivos = [
-    { tipo: "emagrecer" as Objetivo, icone: "📉", label: "Emagrecer" },
-    { tipo: "manter" as Objetivo, icone: "⚖️", label: "Manter" },
-    { tipo: "ganhar" as Objetivo, icone: "📈", label: "Ganhar massa" },
-  ];
+  const obj = objetivoConfig[paciente.objetivo ?? "manter"];
 
   return (
     <div className="min-h-screen bg-gray-50 pb-24">
+      {/* Header */}
       <div className="bg-white shadow-sm px-5 pt-12 pb-5">
         <h1 className="text-xl font-bold text-gray-800">Meu Perfil 👤</h1>
       </div>
 
-      <div className="px-4 mt-4 grid grid-cols-3 gap-3">
-        {[
-          { icone: "⭐", valor: xpTotal, label: "XP Total" },
-          { icone: "🏅", valor: `Nv ${nivel}`, label: "Nível" },
-          { icone: "🔥", valor: streakDias, label: "Streak" },
-        ].map((s) => (
-          <div
-            key={s.label}
-            className="bg-white rounded-2xl p-3 text-center shadow-sm"
-          >
-            <p className="text-xl">{s.icone}</p>
-            <p className="font-bold text-gray-800">{s.valor}</p>
-            <p className="text-xs text-gray-400">{s.label}</p>
-          </div>
-        ))}
-      </div>
-
-      <div className="px-4 mt-4 space-y-3">
-        <div className="bg-white rounded-2xl p-4 shadow-sm">
-          <label className="text-xs font-bold text-gray-400 uppercase tracking-wide">
-            Nome
-          </label>
-          <input
-            value={nome}
-            onChange={(e) => setNome(e.target.value)}
-            className="w-full mt-1 text-gray-800 font-medium outline-none
-              border-b border-gray-100 pb-1 focus:border-green-400"
-          />
-        </div>
-
-        <div className="bg-white rounded-2xl p-4 shadow-sm">
-          <label className="text-xs font-bold text-gray-400 uppercase tracking-wide">
-            Dados Físicos
-          </label>
-          <div className="grid grid-cols-3 gap-3 mt-3">
-            {[
-              {
-                label: "Peso (kg)",
-                value: peso,
-                setter: setPeso,
-                placeholder: "70",
-              },
-              {
-                label: "Altura (m)",
-                value: altura,
-                setter: setAltura,
-                placeholder: "1.70",
-              },
-              {
-                label: "Idade",
-                value: idade,
-                setter: setIdade,
-                placeholder: "30",
-              },
-            ].map((field) => (
-              <div key={field.label}>
-                <p className="text-xs text-gray-400 mb-1">{field.label}</p>
-                <input
-                  type="number"
-                  value={field.value}
-                  onChange={(e) => field.setter(e.target.value)}
-                  placeholder={field.placeholder}
-                  className="w-full border border-gray-200 rounded-xl px-3 py-2
-                    text-sm text-center outline-none focus:border-green-400 font-medium"
-                />
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {imc && (
-          <div className="bg-white rounded-2xl p-4 shadow-sm">
-            <label className="text-xs font-bold text-gray-400 uppercase tracking-wide">
-              IMC Calculado
-            </label>
-            <div className="flex items-center justify-between mt-2">
-              <span className="text-3xl font-bold text-gray-800">{imc}</span>
-              <span
-                className={`font-semibold text-sm ${classificacaoIMC(Number(imc)).cor}`}
-              >
-                {classificacaoIMC(Number(imc)).texto}
-              </span>
+      <div className="px-4 mt-4 space-y-4">
+        {/* Stats */}
+        <div className="grid grid-cols-3 gap-3">
+          {[
+            { icone: "⭐", valor: xpTotal, label: "XP Total" },
+            { icone: "🏅", valor: `Nv ${nivel}`, label: "Nível" },
+            { icone: "🔥", valor: `${streakDias}d`, label: "Streak" },
+          ].map((s) => (
+            <div
+              key={s.label}
+              className="bg-white rounded-2xl p-3 text-center shadow-sm"
+            >
+              <p className="text-xl">{s.icone}</p>
+              <p className="font-bold text-gray-800">{s.valor}</p>
+              <p className="text-xs text-gray-400">{s.label}</p>
             </div>
-            {caloriasDiarias && (
-              <p className="text-xs text-gray-400 mt-2">
-                💡 Necessidade calórica estimada:{" "}
-                <b className="text-gray-600">{caloriasDiarias} kcal/dia</b>
-              </p>
-            )}
-          </div>
-        )}
+          ))}
+        </div>
 
-        <div className="bg-white rounded-2xl p-4 shadow-sm">
-          <label className="text-xs font-bold text-gray-400 uppercase tracking-wide">
+        {/* Objetivo */}
+        <div className={`${obj.bg} rounded-2xl p-5 border border-opacity-20`}>
+          <p className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-3">
             Meu Objetivo
-          </label>
-          <div className="flex gap-2 mt-3">
-            {objetivos.map((o) => (
-              <button
-                key={o.tipo}
-                onClick={() => setObjetivo(o.tipo)}
-                className={`flex-1 flex flex-col items-center gap-1 py-3 rounded-xl
-                  border-2 transition-all
-                  ${
-                    objetivo === o.tipo
-                      ? "border-green-500 bg-green-50 text-green-700"
-                      : "border-gray-100 text-gray-400"
-                  }`}
-              >
-                <span className="text-xl">{o.icone}</span>
-                <span className="text-xs">{o.label}</span>
-              </button>
-            ))}
+          </p>
+
+          <div className="flex items-center gap-4">
+            <div
+              className={`w-14 h-14 rounded-2xl bg-gradient-to-br ${obj.cor}
+              flex items-center justify-center text-2xl shadow-md`}
+            >
+              {obj.icone}
+            </div>
+
+            <div className="flex-1">
+              <p className={`font-bold text-lg ${obj.texto}`}>{obj.titulo}</p>
+              <p className="text-sm text-gray-500 leading-snug mt-0.5">
+                {obj.desc}
+              </p>
+            </div>
           </div>
         </div>
 
-        <button
-          onClick={salvarPerfilLocal}
-          className="w-full bg-green-500 text-white font-bold py-4 rounded-2xl
-            shadow-md active:scale-95 transition-all"
-        >
-          {salvando ? "💾 Salvando..." : salvo ? "✓ Salvo!" : "Salvar Perfil"}
-        </button>
+        {/* Dados pessoais */}
+        <div className="bg-white rounded-2xl p-5 shadow-sm">
+          <p className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-4">
+            Dados Pessoais
+          </p>
+
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs text-gray-400">Nome</label>
+              <div
+                className="w-full mt-1 border border-gray-100 rounded-xl px-4 py-2.5
+                bg-gray-50 text-sm text-gray-600 font-medium"
+              >
+                {nome}
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs text-gray-400">Email</label>
+              <div
+                className="w-full mt-1 border border-gray-100 rounded-xl px-4 py-2.5
+                bg-gray-50 text-sm text-gray-600"
+              >
+                {email}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-gray-400">Peso (kg)</label>
+                <div
+                  className="w-full mt-1 border border-gray-100 rounded-xl px-4 py-2.5
+                  bg-gray-50 text-sm text-center font-medium text-gray-600"
+                >
+                  {peso}
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs text-gray-400">Altura (m)</label>
+                <div
+                  className="w-full mt-1 border border-gray-100 rounded-xl px-4 py-2.5
+                  bg-gray-50 text-sm text-center font-medium text-gray-600"
+                >
+                  {altura}
+                </div>
+              </div>
+            </div>
+
+            <p className="text-xs text-gray-400 mt-2">
+              Informações atualizadas pela nutricionista.
+            </p>
+          </div>
+        </div>
       </div>
     </div>
   );

@@ -2,9 +2,10 @@ import { useState } from "react";
 import type { Nutricionista, Paciente } from "../../lib/supabase";
 import {
   extrairTextoPDF,
-  extrairDadosAnamnese,
-  gerarMissoesSugeridas,
-  extrairRefeicoes,
+  extrairDadosAnamneseComIA,
+  gerarMissoesComIA,
+  extrairRefeicoesComIA,
+  type MissaoGerada,
 } from "../../services/pdfService";
 import {
   cadastrarPaciente,
@@ -14,23 +15,13 @@ import {
   salvarPlanoAlimentar,
 } from "../../services/nutricionistaService";
 
-interface MissaoSugerida {
-  paciente_id: string;
-  titulo: string;
-  descricao: string;
-  tipo: "hidratacao" | "alimentacao" | "atividade" | "educacional";
-  icone: string;
-  xp_recompensa: number;
-  prioridade: number;
-  aprovada_nutri: boolean;
-  ativa: boolean;
-  id?: string;
-}
+type MissaoSugerida = MissaoGerada;
 
 interface DadosExtraidos {
   nome: string;
   peso: number;
   altura: number;
+  idade: number;
   objetivo: "emagrecer" | "manter" | "ganhar";
   dificuldades: {
     agua: boolean;
@@ -43,6 +34,8 @@ interface DadosExtraidos {
   atividade_fisica: string;
   ingestao_agua: string;
   texto_completo: string;
+  observacoes_relevantes: string;
+  [key: string]: unknown;
 }
 
 interface Props {
@@ -89,7 +82,6 @@ export default function AdminUploadPaciente({
   const [erro, setErro] = useState("");
   const [salvando, setSalvando] = useState(false);
 
-  // Campos editáveis do paciente
   const [nome, setNome] = useState("");
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
@@ -109,36 +101,39 @@ export default function AdminUploadPaciente({
     setEtapa("processando");
 
     try {
-      // Lê anamnese
+      // 1. Lê e interpreta a anamnese com IA
       const textoAnamnese = await extrairTextoPDF(arquivoAnamnese);
-      const dadosAnamnese = extrairDadosAnamnese(
+      const dadosAnamnese = (await extrairDadosAnamneseComIA(
         textoAnamnese,
-      ) as DadosExtraidos;
-      setDados(dadosAnamnese);
+      )) as DadosExtraidos;
 
-      // Pré-preenche os campos com o que foi extraído
-      setNome(dadosAnamnese.nome);
-      setEmail(gerarEmailSugerido(dadosAnamnese.nome));
-      setSenha(gerarSenha());
-      setPeso(dadosAnamnese.peso > 0 ? String(dadosAnamnese.peso) : "");
-      setAltura(dadosAnamnese.altura > 0 ? String(dadosAnamnese.altura) : "");
-      setObjetivo(dadosAnamnese.objetivo);
-
-      // Lê plano alimentar se tiver
-      let refeicoesExtraidas: ReturnType<typeof extrairRefeicoes> = [];
-      if (arquivoPlano) {
-        const textoPlano = await extrairTextoPDF(arquivoPlano);
-        refeicoesExtraidas = extrairRefeicoes(textoPlano);
+      if (!dadosAnamnese) {
+        setErro("A IA não conseguiu ler a anamnese. Tente novamente.");
+        setEtapa("upload");
+        return;
       }
 
-      // Cria paciente no banco com id temporário para gerar as missões
+      setDados(dadosAnamnese);
+
+      // 2. Preenche campos editáveis com dados extraídos
+      const emailGerado = gerarEmailSugerido(dadosAnamnese.nome);
+      const senhaGerada = gerarSenha();
+      setNome(dadosAnamnese.nome);
+      setEmail(emailGerado);
+      setSenha(senhaGerada);
+      setPeso(dadosAnamnese.peso > 0 ? String(dadosAnamnese.peso) : "");
+      setAltura(dadosAnamnese.altura > 0 ? String(dadosAnamnese.altura) : "");
+      setIdade(dadosAnamnese.idade > 0 ? String(dadosAnamnese.idade) : "");
+      setObjetivo(dadosAnamnese.objetivo);
+
+      // 3. Cria o paciente no banco
       const paciente = await cadastrarPaciente(nutri.id, {
         nome: dadosAnamnese.nome,
-        email: gerarEmailSugerido(dadosAnamnese.nome),
-        senha_temp: gerarSenha(),
+        email: emailGerado,
+        senha_temp: senhaGerada,
         peso: dadosAnamnese.peso,
         altura: dadosAnamnese.altura,
-        idade: 0,
+        idade: dadosAnamnese.idade ?? 0,
         objetivo: dadosAnamnese.objetivo,
         observacoes_anamnese: textoAnamnese.slice(0, 2000),
       });
@@ -151,17 +146,21 @@ export default function AdminUploadPaciente({
 
       setPacienteCriado(paciente);
 
-      // Salva plano alimentar
-      if (refeicoesExtraidas.length > 0) {
-        await salvarPlanoAlimentar(paciente.id, refeicoesExtraidas);
+      // 4. Processa plano alimentar se enviado
+      if (arquivoPlano) {
+        const textoPlano = await extrairTextoPDF(arquivoPlano);
+        const refeicoes = await extrairRefeicoesComIA(textoPlano);
+        if (refeicoes.length > 0) {
+          await salvarPlanoAlimentar(paciente.id, refeicoes);
+        }
       }
 
-      // Gera e salva missões
-      const sugeridas = gerarMissoesSugeridas(
+      // 5. Gera missões personalizadas com IA
+      const sugeridas = await gerarMissoesComIA(
         paciente.id,
         dadosAnamnese,
-      ) as MissaoSugerida[];
-
+        textoAnamnese,
+      );
       await salvarMissoes(sugeridas);
       setMissoes(sugeridas);
       setEtapa("revisao");
@@ -194,7 +193,6 @@ export default function AdminUploadPaciente({
     if (!pacienteCriado) return;
     setSalvando(true);
 
-    // Aprova/remove missões
     for (const missao of missoes) {
       if (missao.id) {
         if (missao.aprovada_nutri) {
@@ -210,7 +208,7 @@ export default function AdminUploadPaciente({
   }
 
   const aprovadas = missoes.filter((m) => m.aprovada_nutri).length;
-  const primeiroNome = nome.split(" ")[0];
+  const primeiroNome = nome.split(" ")[0] || "Paciente";
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -231,7 +229,7 @@ export default function AdminUploadPaciente({
       </div>
 
       <div className="max-w-2xl mx-auto px-4 py-6">
-        {/* UPLOAD */}
+        {/* ── UPLOAD ──────────────────────────────────────── */}
         {etapa === "upload" && (
           <div className="space-y-4">
             <div className="bg-white rounded-2xl p-5 shadow-sm">
@@ -244,7 +242,6 @@ export default function AdminUploadPaciente({
               </p>
 
               <div className="space-y-3">
-                {/* Anamnese — obrigatório */}
                 <div>
                   <p className="text-xs font-bold text-gray-500 mb-1">
                     ANAMNESE <span className="text-red-400">*obrigatório</span>
@@ -282,7 +279,6 @@ export default function AdminUploadPaciente({
                   </label>
                 </div>
 
-                {/* Plano — opcional */}
                 <div>
                   <p className="text-xs font-bold text-gray-500 mb-1">
                     PLANO ALIMENTAR{" "}
@@ -340,7 +336,7 @@ export default function AdminUploadPaciente({
           </div>
         )}
 
-        {/* PROCESSANDO */}
+        {/* ── PROCESSANDO ─────────────────────────────────── */}
         {etapa === "processando" && (
           <div className="text-center py-20">
             <div className="text-6xl mb-4 animate-bounce">🤖</div>
@@ -353,17 +349,16 @@ export default function AdminUploadPaciente({
           </div>
         )}
 
-        {/* REVISÃO */}
+        {/* ── REVISÃO ─────────────────────────────────────── */}
         {etapa === "revisao" && (
           <div className="space-y-4">
-            {/* Dados extraídos — editáveis */}
+            {/* Dados editáveis */}
             <div className="bg-white rounded-2xl p-5 shadow-sm">
               <h2 className="font-bold text-gray-700 mb-1">
                 ✅ Paciente cadastrado — revise os dados
               </h2>
               <p className="text-xs text-gray-400 mb-4">
-                Dados extraídos automaticamente da anamnese. Corrija se
-                necessário.
+                Dados extraídos automaticamente. Corrija se necessário.
               </p>
 
               <div className="space-y-3">
@@ -413,7 +408,6 @@ export default function AdminUploadPaciente({
                   ))}
                 </div>
 
-                {/* Objetivo */}
                 <div>
                   <label className="text-xs font-bold text-gray-400 uppercase">
                     Objetivo
@@ -446,7 +440,6 @@ export default function AdminUploadPaciente({
                   </div>
                 </div>
 
-                {/* Senha */}
                 <div className="bg-green-50 border border-green-200 rounded-xl p-3">
                   <label className="text-xs font-bold text-gray-500 uppercase">
                     Senha de acesso
@@ -470,11 +463,10 @@ export default function AdminUploadPaciente({
                   </p>
                 </div>
 
-                {/* Dificuldades detectadas */}
                 {dados && (
                   <div>
                     <p className="text-xs font-bold text-gray-400 uppercase mb-2">
-                      Dificuldades detectadas na anamnese
+                      Dificuldades detectadas
                     </p>
                     <div className="flex flex-wrap gap-2">
                       {dados.dificuldades.agua && (
@@ -514,8 +506,8 @@ export default function AdminUploadPaciente({
                 🎯 Missões sugeridas — revise e aprove
               </h2>
               <p className="text-xs text-gray-400 mb-4">
-                Geradas com base nas dificuldades detectadas na anamnese. Clique
-                no círculo para aprovar, no ✕ para remover.
+                Geradas com IA com base na anamnese. Clique no círculo para
+                aprovar, no ✕ para remover.
               </p>
 
               <div className="space-y-3">
@@ -607,7 +599,7 @@ export default function AdminUploadPaciente({
           </div>
         )}
 
-        {/* SUCESSO */}
+        {/* ── SUCESSO ─────────────────────────────────────── */}
         {etapa === "salvo" && (
           <div className="text-center py-16">
             <div className="text-6xl mb-4">🎉</div>

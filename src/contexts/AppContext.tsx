@@ -1,22 +1,7 @@
-import {
-  createContext,
-  useContext,
-  useState,
-  useEffect,
-  type ReactNode,
-} from "react";
+import { useState, useEffect, type ReactNode } from "react";
 import { salvarEstado, carregarEstado, calcularStreak } from "../utils/storage";
-
-interface AppState {
-  xpTotal: number;
-  nivel: number;
-  streakDias: number;
-  nomeUsuario: string;
-  setNomeUsuario: (nome: string) => void;
-  ganharXP: (quantidade: number) => void;
-}
-
-const AppContext = createContext<AppState>({} as AppState);
+import type { Paciente } from "../lib/supabase";
+import { AppContext } from "./useApp";
 
 function calcularStreakInicial(): number {
   const estadoSalvo = carregarEstado();
@@ -24,12 +9,18 @@ function calcularStreakInicial(): number {
   return calcularStreak(estadoSalvo.ultimoAcesso, estadoSalvo.streakDias);
 }
 
-export function AppProvider({ children }: { children: ReactNode }) {
+export function AppProvider({
+  children,
+  paciente,
+}: {
+  children: ReactNode;
+  paciente: Paciente;
+}) {
   const estadoSalvo = carregarEstado();
 
   const [xpTotal, setXpTotal] = useState(estadoSalvo?.xpTotal ?? 0);
   const [streakDias] = useState(calcularStreakInicial);
-  const [nomeUsuario, setNomeUsuario] = useState("Paciente");
+  const [nomeUsuario, setNomeUsuario] = useState(paciente.nome);
 
   const nivel = Math.floor(xpTotal / 200) + 1;
 
@@ -53,6 +44,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         nivel,
         streakDias,
         nomeUsuario,
+        paciente,
         setNomeUsuario,
         ganharXP,
       }}
@@ -61,5 +53,3 @@ export function AppProvider({ children }: { children: ReactNode }) {
     </AppContext.Provider>
   );
 }
-
-export const useApp = () => useContext(AppContext);

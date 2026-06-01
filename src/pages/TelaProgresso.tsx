@@ -1,4 +1,4 @@
-import { useApp } from "../contexts/AppContext";
+import { useApp } from "../contexts/useApp";
 
 interface Conquista {
   id: string;

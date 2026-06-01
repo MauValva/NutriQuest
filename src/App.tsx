@@ -9,28 +9,32 @@ import TelaPerfil from "./pages/TelaPerfil";
 import TelaOnboarding from "./pages/TelaOnboarding";
 import AdminApp from "./admin/AdminApp";
 import { salvarEmail, onboardingConcluido } from "./utils/storage";
+import { loginPaciente } from "./services/pacienteService";
+import type { Paciente } from "./lib/supabase";
 
 export default function App() {
+  const [paciente, setPaciente] = useState<Paciente | null>(null);
   const [logado, setLogado] = useState(onboardingConcluido);
 
-  // Rota do painel admin
   if (window.location.pathname.startsWith("/admin")) {
     return <AdminApp />;
   }
 
-  if (!logado) {
-    return (
-      <TelaOnboarding
-        onConcluir={(e) => {
-          salvarEmail(e);
-          setLogado(true);
-        }}
-      />
-    );
+  async function handleLogin(email: string, senha: string): Promise<boolean> {
+    const p = await loginPaciente(email, senha);
+    if (!p) return false;
+    setPaciente(p);
+    salvarEmail(email);
+    setLogado(true);
+    return true;
+  }
+
+  if (!logado || !paciente) {
+    return <TelaOnboarding onConcluir={handleLogin} />;
   }
 
   return (
-    <AppProvider>
+    <AppProvider paciente={paciente}>
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<TelaMissoes />} />
