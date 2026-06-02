@@ -44,7 +44,7 @@ export interface MissaoDB {
 export interface RefeicaoPlano {
   id: string;
   paciente_id: string;
-  tipo: "cafe" | "almoco" | "lanche" | "jantar";
+  tipo: "cafe" | "almoco" | "sobremesa" | "lanche" | "jantar";
   horario: string;
   opcoes: OpcaoRefeicao[];
   observacoes: string;

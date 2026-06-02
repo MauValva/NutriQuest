@@ -54,14 +54,19 @@ const TIPO_LABEL: Record<string, { label: string; cor: string }> = {
 };
 
 function gerarEmailSugerido(nome: string): string {
-  return (
-    nome
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .replace(/\s+/g, ".")
-      .replace(/[^a-z.]/g, "") + "@email.com"
-  );
+  const partes = nome
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z\s]/g, "")
+    .trim()
+    .split(/\s+/);
+
+  const primeiro = partes[0] ?? "paciente";
+  const segundo = partes[1] ?? "";
+  const emailBase = segundo ? `${primeiro}${segundo}` : primeiro;
+
+  return `${emailBase}@nutriquest.com`;
 }
 
 function gerarSenha(): string {
@@ -81,7 +86,7 @@ export default function AdminUploadPaciente({
   const [pacienteCriado, setPacienteCriado] = useState<Paciente | null>(null);
   const [erro, setErro] = useState("");
   const [salvando, setSalvando] = useState(false);
-
+  const [progressoMsg, setProgressoMsg] = useState("Processando...");
   const [nome, setNome] = useState("");
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
@@ -99,9 +104,10 @@ export default function AdminUploadPaciente({
     }
     setErro("");
     setEtapa("processando");
+    setProgressoMsg("📋 Lendo anamnese...");
 
     try {
-      // 1. Lê e interpreta a anamnese com IA
+      // ETAPA 1 — Anamnese
       const textoAnamnese = await extrairTextoPDF(arquivoAnamnese);
       const dadosAnamnese = (await extrairDadosAnamneseComIA(
         textoAnamnese,
@@ -114,8 +120,6 @@ export default function AdminUploadPaciente({
       }
 
       setDados(dadosAnamnese);
-
-      // 2. Preenche campos editáveis com dados extraídos
       const emailGerado = gerarEmailSugerido(dadosAnamnese.nome);
       const senhaGerada = gerarSenha();
       setNome(dadosAnamnese.nome);
@@ -126,7 +130,8 @@ export default function AdminUploadPaciente({
       setIdade(dadosAnamnese.idade > 0 ? String(dadosAnamnese.idade) : "");
       setObjetivo(dadosAnamnese.objetivo);
 
-      // 3. Cria o paciente no banco
+      // ETAPA 2 — Cadastrar paciente
+      setProgressoMsg("👤 Cadastrando paciente...");
       const paciente = await cadastrarPaciente(nutri.id, {
         nome: dadosAnamnese.nome,
         email: emailGerado,
@@ -146,29 +151,33 @@ export default function AdminUploadPaciente({
 
       setPacienteCriado(paciente);
 
-      // 4. Processa plano alimentar se enviado
+      // ETAPA 3 — Plano alimentar (separado da anamnese)
       if (arquivoPlano) {
-        const textoPlano = await extrairTextoPDF(arquivoPlano);
-        const refeicoes = await extrairRefeicoesComIA(textoPlano);
-        if (refeicoes.length > 0) {
-          await salvarPlanoAlimentar(paciente.id, refeicoes);
+        setProgressoMsg("🥗 Lendo plano alimentar... (pode levar ~30s)");
+        try {
+          const textoPlano = await extrairTextoPDF(arquivoPlano);
+          const refeicoes = await extrairRefeicoesComIA(textoPlano);
+          if (refeicoes.length > 0) {
+            await salvarPlanoAlimentar(paciente.id, refeicoes);
+          }
+        } catch (e) {
+          console.warn(
+            "Erro ao processar plano alimentar — continuando sem ele:",
+            e,
+          );
+          // Não bloqueia o fluxo — missões ainda serão geradas
         }
       }
 
-      // 5. Gera missões personalizadas com IA
-      const sugeridas = await gerarMissoesComIA(
-        paciente.id,
-        dadosAnamnese,
-        textoAnamnese,
-      );
+      // ETAPA 4 — Missões com IA
+      setProgressoMsg("🎯 Gerando missões personalizadas...");
+      const sugeridas = await gerarMissoesComIA(paciente.id, dadosAnamnese);
       await salvarMissoes(sugeridas);
       setMissoes(sugeridas);
       setEtapa("revisao");
     } catch (e) {
       console.error(e);
-      setErro(
-        "Erro ao processar os PDFs. Verifique os arquivos e tente novamente.",
-      );
+      setErro("Erro ao processar. Verifique os arquivos e tente novamente.");
       setEtapa("upload");
     }
   }
@@ -341,11 +350,20 @@ export default function AdminUploadPaciente({
           <div className="text-center py-20">
             <div className="text-6xl mb-4 animate-bounce">🤖</div>
             <h2 className="font-bold text-gray-700 text-lg mb-2">
-              Lendo os PDFs...
+              {progressoMsg}
             </h2>
             <p className="text-gray-400 text-sm">
-              Extraindo dados e criando o perfil do paciente
+              A IA está analisando os documentos
             </p>
+            <div className="mt-6 flex justify-center gap-1">
+              {[0, 1, 2].map((i) => (
+                <div
+                  key={i}
+                  className="w-2 h-2 bg-green-400 rounded-full animate-bounce"
+                  style={{ animationDelay: `${i * 0.15}s` }}
+                />
+              ))}
+            </div>
           </div>
         )}
 

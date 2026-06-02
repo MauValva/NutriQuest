@@ -1,14 +1,22 @@
 import { useState, useEffect } from "react";
 import { useApp } from "../contexts/useApp";
-import { buscarPlanoAlimentar } from "../services/pacienteService";
+import {
+  buscarPlanoAlimentar,
+  registrarRefeicaoConfirmada,
+} from "../services/pacienteService";
 
-type TipoRefeicao = "cafe" | "almoco" | "jantar" | "lanche";
+type TipoRefeicao = "cafe" | "almoco" | "sobremesa" | "lanche" | "jantar";
+
+interface Alternativa {
+  nome: string;
+  quantidade: string;
+}
 
 interface ItemRefeicao {
   nome: string;
   quantidade: string;
-  alternativas?: string[];
-  selecionado?: number; // índice da alternativa selecionada
+  alternativas?: Alternativa[];
+  selecionado?: number;
 }
 
 interface OpcaoRefeicao {
@@ -16,6 +24,7 @@ interface OpcaoRefeicao {
   itens: ItemRefeicao[];
   observacoes?: string;
   concluida?: boolean;
+  bloqueada?: boolean;
 }
 
 interface RefeicaoPlano {
@@ -28,22 +37,93 @@ interface RefeicaoPlano {
 const ABAS: { tipo: TipoRefeicao; icone: string; label: string }[] = [
   { tipo: "cafe", icone: "🌅", label: "Café" },
   { tipo: "almoco", icone: "🍽️", label: "Almoço" },
-  { tipo: "jantar", icone: "🌙", label: "Jantar" },
+  { tipo: "sobremesa", icone: "🍫", label: "Sobremesa" },
   { tipo: "lanche", icone: "🥪", label: "Lanche" },
+  { tipo: "jantar", icone: "🌙", label: "Jantar" },
 ];
 
 // Detecta alternativas no nome do item (separadas por " - ou - " ou " ou ")
 function parseItem(nomeCompleto: string): ItemRefeicao {
-  const partes = nomeCompleto.split(/ - ou - | ou /i);
+  const partes = nomeCompleto.split(
+    /\s+-\s+ou\s+-\s+|\s+ou\s+|\s+OU\s+|\/|\|/i,
+  );
+
   if (partes.length > 1) {
     return {
       nome: partes[0].trim(),
       quantidade: "",
-      alternativas: partes.map((p) => p.trim()),
+      alternativas: partes.map((p) => ({
+        nome: p.trim(),
+        quantidade: "",
+      })),
       selecionado: 0,
     };
   }
-  return { nome: nomeCompleto.trim(), quantidade: "" };
+
+  return {
+    nome: nomeCompleto.trim(),
+    quantidade: "",
+  };
+}
+
+function detectarCategoria(texto: string) {
+  const t = texto.toLowerCase();
+
+  if (
+    t.includes("frango") ||
+    t.includes("carne") ||
+    t.includes("peixe") ||
+    t.includes("atum") ||
+    t.includes("sardinha") ||
+    t.includes("ovo")
+  ) {
+    return {
+      titulo: "Proteína",
+      icone: "🍗",
+    };
+  }
+
+  if (
+    t.includes("requeijão") ||
+    t.includes("ricota") ||
+    t.includes("maionese")
+  ) {
+    return {
+      titulo: "Complemento",
+      icone: "🧀",
+    };
+  }
+
+  if (
+    t.includes("arroz") ||
+    t.includes("batata") ||
+    t.includes("wrap") ||
+    t.includes("pão")
+  ) {
+    return {
+      titulo: "Carboidrato",
+      icone: "🍞",
+    };
+  }
+
+  if (t.includes("leite") || t.includes("iogurte") || t.includes("whey")) {
+    return {
+      titulo: "Laticínio",
+      icone: "🥛",
+    };
+  }
+
+  if (t.includes("fruta")) {
+    return {
+      titulo: "Fruta",
+      icone: "🍎",
+    };
+  }
+
+  return {
+    titulo: "Escolha uma opção",
+    icone: "✨",
+  };
 }
 
 export default function TelaRefeicoes() {
@@ -120,19 +200,25 @@ export default function TelaRefeicoes() {
     );
   }
 
-  function concluirOpcao(opcaoIdx: number) {
+  async function concluirOpcao(opcaoIdx: number) {
     setPlano((prev) =>
       prev.map((r) => {
         if (r.tipo !== abaAtiva) return r;
         return {
           ...r,
-          opcoes: r.opcoes.map((op, oi) =>
-            oi === opcaoIdx ? { ...op, concluida: true } : op,
-          ),
+          opcoes: r.opcoes.map((op, oi) => ({
+            ...op,
+            concluida: oi === opcaoIdx ? true : op.concluida,
+            bloqueada:
+              oi !== opcaoIdx && !op.concluida ? true : (op.bloqueada ?? false),
+          })),
         };
       }),
     );
     setOpcaoAberta(null);
+
+    // Salva no Supabase em background
+    await registrarRefeicaoConfirmada(paciente.id, abaAtiva, opcaoIdx + 1);
   }
 
   function opcaoProntoParaConcluir(opcao: OpcaoRefeicao): boolean {
@@ -160,7 +246,7 @@ export default function TelaRefeicoes() {
         <h1 className="text-xl font-bold text-gray-800 mb-4">Refeições 🍽️</h1>
 
         {/* Abas — todas visíveis sem scroll */}
-        <div className="grid grid-cols-4 gap-1.5">
+        <div className="grid grid-cols-5 gap-1">
           {ABAS.map((aba) => (
             <button
               key={aba.tipo}
@@ -187,6 +273,17 @@ export default function TelaRefeicoes() {
         {/* Horário */}
         {refeicaoAtiva && (
           <div className="bg-green-600 text-white rounded-2xl px-5 py-3 mb-4 text-center">
+            <div className="bg-white rounded-2xl p-4 mb-4 shadow-sm flex gap-3 items-center">
+              <div className="text-4xl">🥦</div>
+
+              <div>
+                <p className="font-bold text-gray-800">Monte sua refeição</p>
+
+                <p className="text-sm text-gray-500">
+                  Escolha uma opção em cada grupo.
+                </p>
+              </div>
+            </div>
             <p className="font-bold text-lg">
               {refeicaoAtiva.horario} —{" "}
               {ABAS.find((a) => a.tipo === abaAtiva)?.label}
@@ -225,8 +322,9 @@ export default function TelaRefeicoes() {
               >
                 {/* Cabeçalho da opção */}
                 <button
-                  onClick={() => toggleOpcao(opcaoIdx)}
-                  className="w-full flex items-center justify-between px-5 py-4"
+                  onClick={() => !opcao.bloqueada && toggleOpcao(opcaoIdx)}
+                  className={`w-full flex items-center justify-between px-5 py-4
+    ${opcao.bloqueada ? "opacity-40 cursor-not-allowed" : "cursor-pointer"}`}
                 >
                   <div className="flex items-center gap-3">
                     {opcao.concluida && (
@@ -254,61 +352,147 @@ export default function TelaRefeicoes() {
                 {/* Conteúdo expandido */}
                 {aberta && (
                   <div className="px-5 pb-5">
-                    <div className="space-y-3 mb-4">
-                      {opcao.itens.map((item, itemIdx) => (
-                        <div key={itemIdx}>
-                          {item.alternativas ? (
-                            // Item com alternativas — seleção
-                            <div>
-                              <p className="text-xs text-gray-400 mb-1.5 font-medium">
-                                Escolha uma opção:
+                    {/* ITENS SIMPLES — aparecem primeiro, destaque visual */}
+                    {(() => {
+                      const simples = opcao.itens.filter(
+                        (i) => !i.alternativas,
+                      );
+                      const comOpcao = opcao.itens.filter(
+                        (i) => i.alternativas,
+                      );
+
+                      return (
+                        <>
+                          {/* Itens fixos — sem escolha */}
+                          {simples.length > 0 && (
+                            <div
+                              className="bg-green-50 border border-green-100 rounded-2xl
+              px-4 py-3 mb-4"
+                            >
+                              <p
+                                className="text-xs font-bold text-green-600 uppercase
+                tracking-wide mb-2"
+                              >
+                                Inclusos na refeição
                               </p>
-                              <div className="space-y-1.5">
-                                {item.alternativas.map((alt, altIdx) => (
-                                  <button
-                                    key={altIdx}
-                                    onClick={() =>
-                                      selecionarAlternativa(
-                                        opcaoIdx,
-                                        itemIdx,
-                                        altIdx,
-                                      )
-                                    }
-                                    className={`w-full text-left px-3 py-2 rounded-xl
-                                      text-sm border-2 transition-all
-                                      ${
-                                        item.selecionado === altIdx
-                                          ? "border-green-500 bg-green-50 text-green-800 font-medium"
-                                          : "border-gray-100 bg-gray-50 text-gray-600"
-                                      }`}
+                              <div className="space-y-2">
+                                {simples.map((item, idx) => (
+                                  <div
+                                    key={idx}
+                                    className="flex items-center gap-3"
                                   >
-                                    {item.selecionado === altIdx && "✓ "}
-                                    {alt}
-                                  </button>
+                                    <span
+                                      className="w-5 h-5 rounded-full bg-green-500
+                      flex items-center justify-center flex-shrink-0"
+                                    >
+                                      <span className="text-white text-xs font-bold">
+                                        ✓
+                                      </span>
+                                    </span>
+                                    <div>
+                                      <p className="text-sm font-semibold text-gray-800">
+                                        {item.nome}
+                                      </p>
+                                      {item.quantidade && (
+                                        <p className="text-xs text-gray-400">
+                                          {item.quantidade}
+                                        </p>
+                                      )}
+                                    </div>
+                                  </div>
                                 ))}
                               </div>
                             </div>
-                          ) : (
-                            // Item simples
-                            <div className="flex items-start gap-2">
-                              <span className="text-green-500 mt-0.5 flex-shrink-0">
-                                •
-                              </span>
-                              <p className="text-sm text-gray-700">
-                                {item.nome}
+                          )}
+
+                          {/* Itens com alternativas — escolha do paciente */}
+                          {comOpcao.length > 0 && (
+                            <div className="space-y-4 mb-4">
+                              <p className="text-xs font-bold text-gray-400 uppercase tracking-wide">
+                                Escolha em cada grupo
                               </p>
+                              {comOpcao.map((item, itemIdx) => {
+                                // Índice real no array original para manter seleção correta
+                                const idxReal = opcao.itens.indexOf(item);
+                                const cat = detectarCategoria(
+                                  item.alternativas![0].nome,
+                                );
+
+                                return (
+                                  <div key={itemIdx}>
+                                    <div className="flex items-center gap-2 mb-2">
+                                      <span className="text-lg">
+                                        {cat.icone}
+                                      </span>
+                                      <p className="font-semibold text-sm text-gray-700">
+                                        {cat.titulo}
+                                      </p>
+                                    </div>
+
+                                    <div className="grid gap-2">
+                                      {item.alternativas!.map((alt, altIdx) => {
+                                        const selecionado =
+                                          item.selecionado === altIdx;
+                                        return (
+                                          <button
+                                            key={altIdx}
+                                            onClick={() =>
+                                              selecionarAlternativa(
+                                                opcaoIdx,
+                                                idxReal,
+                                                altIdx,
+                                              )
+                                            }
+                                            className={`text-left rounded-2xl border-2 px-4 py-3
+                              transition-all
+                              ${
+                                selecionado
+                                  ? "border-green-500 bg-green-50"
+                                  : "border-gray-100 bg-white hover:border-green-200"
+                              }`}
+                                          >
+                                            <div className="flex items-center gap-3">
+                                              <div
+                                                className={`w-6 h-6 rounded-full flex items-center
+                                justify-center text-xs font-bold flex-shrink-0
+                                ${
+                                  selecionado
+                                    ? "bg-green-500 text-white"
+                                    : "bg-gray-100 text-gray-400"
+                                }`}
+                                              >
+                                                {selecionado ? "✓" : ""}
+                                              </div>
+                                              <div>
+                                                <p
+                                                  className={`text-sm font-medium
+                                  ${selecionado ? "text-green-800" : "text-gray-700"}`}
+                                                >
+                                                  {alt.nome}
+                                                </p>
+                                                {alt.quantidade && (
+                                                  <p className="text-xs text-gray-400">
+                                                    {alt.quantidade}
+                                                  </p>
+                                                )}
+                                              </div>
+                                            </div>
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                );
+                              })}
                             </div>
                           )}
-                        </div>
-                      ))}
-                    </div>
+                        </>
+                      );
+                    })()}
 
                     {/* Observações */}
                     {opcao.observacoes && (
-                      <div
-                        className="bg-amber-50 border border-amber-200
-                        rounded-xl px-3 py-2 mb-4"
-                      >
+                      <div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 mb-4">
                         <p className="text-xs text-amber-700">
                           💡 {opcao.observacoes}
                         </p>
@@ -322,14 +506,14 @@ export default function TelaRefeicoes() {
                       }
                       disabled={!pronta || opcao.concluida}
                       className={`w-full py-3.5 rounded-xl font-bold text-sm
-                        transition-all active:scale-95
-                        ${
-                          opcao.concluida
-                            ? "bg-green-100 text-green-600 cursor-default"
-                            : pronta
-                              ? "bg-green-500 text-white shadow-md"
-                              : "bg-gray-100 text-gray-400 cursor-not-allowed"
-                        }`}
+        transition-all active:scale-95
+        ${
+          opcao.concluida
+            ? "bg-green-100 text-green-600 cursor-default"
+            : pronta
+              ? "bg-green-500 text-white shadow-md"
+              : "bg-gray-100 text-gray-400 cursor-not-allowed"
+        }`}
                     >
                       {opcao.concluida
                         ? "✓ Refeição confirmada!"

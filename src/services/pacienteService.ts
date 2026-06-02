@@ -91,3 +91,29 @@ export async function buscarPlanoAlimentar(pacienteId: string) {
   if (error || !data) return [];
   return data;
 }
+
+export async function registrarRefeicaoConfirmada(
+  pacienteId: string,
+  tipo: string,
+  opcaoNumero: number,
+): Promise<boolean> {
+  const hoje = new Date().toISOString().split("T")[0];
+  const horario = new Date().toTimeString().slice(0, 5);
+
+  const { error } = await supabase.from("refeicoes_registradas").upsert(
+    {
+      paciente_id: pacienteId,
+      tipo,
+      data: hoje,
+      horario,
+      alimentos: { opcao: opcaoNumero },
+      total_calorias: 0,
+      macros: {},
+    },
+    {
+      onConflict: "paciente_id,tipo,data",
+    },
+  );
+
+  return !error;
+}
