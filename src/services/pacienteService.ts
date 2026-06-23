@@ -117,3 +117,75 @@ export async function registrarRefeicaoConfirmada(
 
   return !error;
 }
+// Retorna a semana atual no formato "2026-W22"
+function semanaAtual(): string {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), 0, 1);
+  const week = Math.ceil(
+    ((now.getTime() - start.getTime()) / 86400000 + start.getDay() + 1) / 7,
+  );
+  return `${now.getFullYear()}-W${String(week).padStart(2, "0")}`;
+}
+
+// Verifica se a sobremesa ainda está disponível esta semana
+export async function verificarSobremesaDisponivel(
+  pacienteId: string,
+): Promise<{ disponivel: boolean; usadas: number; limite: number }> {
+  const semana = semanaAtual();
+
+  // Busca o limite do plano
+  const { data: plano } = await supabase
+    .from("refeicoes_plano")
+    .select("frequencia_semanal")
+    .eq("paciente_id", pacienteId)
+    .eq("tipo", "sobremesa")
+    .single();
+
+  const limite = plano?.frequencia_semanal ?? 0;
+  if (limite === 0) return { disponivel: false, usadas: 0, limite: 0 };
+
+  // Busca quantas já foram usadas esta semana
+  const { data: controle } = await supabase
+    .from("refeicoes_controle_semanal")
+    .select("quantidade_usada")
+    .eq("paciente_id", pacienteId)
+    .eq("tipo", "sobremesa")
+    .eq("semana", semana)
+    .single();
+
+  const usadas = controle?.quantidade_usada ?? 0;
+  return { disponivel: usadas < limite, usadas, limite };
+}
+
+// Registra uso de sobremesa
+export async function registrarUsoSobremesa(pacienteId: string): Promise<void> {
+  const semana = semanaAtual();
+
+  await supabase.from("refeicoes_controle_semanal").upsert(
+    {
+      paciente_id: pacienteId,
+      tipo: "sobremesa",
+      semana,
+      quantidade_usada: 1,
+    },
+    { onConflict: "paciente_id,tipo,semana" },
+  );
+
+  // Se já existe, incrementa
+  const { data } = await supabase
+    .from("refeicoes_controle_semanal")
+    .select("quantidade_usada")
+    .eq("paciente_id", pacienteId)
+    .eq("tipo", "sobremesa")
+    .eq("semana", semana)
+    .single();
+
+  if (data && data.quantidade_usada >= 1) {
+    await supabase
+      .from("refeicoes_controle_semanal")
+      .update({ quantidade_usada: data.quantidade_usada + 1 })
+      .eq("paciente_id", pacienteId)
+      .eq("tipo", "sobremesa")
+      .eq("semana", semana);
+  }
+}

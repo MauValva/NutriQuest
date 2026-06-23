@@ -5,7 +5,15 @@ import {
   registrarRefeicaoConfirmada,
 } from "../services/pacienteService";
 
-type TipoRefeicao = "cafe" | "almoco" | "sobremesa" | "lanche" | "jantar";
+import { supabase } from "../lib/supabase";
+
+type TipoRefeicao =
+  | "cafe"
+  | "almoco"
+  | "sobremesa"
+  | "lanche"
+  | "jantar"
+  | "complemento";
 
 interface Alternativa {
   nome: string;
@@ -17,6 +25,7 @@ interface ItemRefeicao {
   quantidade: string;
   alternativas?: Alternativa[];
   selecionado?: number;
+  observacao?: string;
 }
 
 interface OpcaoRefeicao {
@@ -29,17 +38,18 @@ interface OpcaoRefeicao {
 
 interface RefeicaoPlano {
   tipo: TipoRefeicao;
-  horario: string;
+  horario?: string;
   opcoes: OpcaoRefeicao[];
   observacoes?: string;
 }
 
-const ABAS: { tipo: TipoRefeicao; icone: string; label: string }[] = [
+const TODAS_ABAS: { tipo: TipoRefeicao; icone: string; label: string }[] = [
   { tipo: "cafe", icone: "🌅", label: "Café" },
   { tipo: "almoco", icone: "🍽️", label: "Almoço" },
-  { tipo: "sobremesa", icone: "🍫", label: "Sobremesa" },
   { tipo: "lanche", icone: "🥪", label: "Lanche" },
   { tipo: "jantar", icone: "🌙", label: "Jantar" },
+  { tipo: "sobremesa", icone: "🍫", label: "Sobremesa" },
+  { tipo: "complemento", icone: "➕", label: "Complemento" },
 ];
 
 // Detecta alternativas no nome do item (separadas por " - ou - " ou " ou ")
@@ -126,12 +136,48 @@ function detectarCategoria(texto: string) {
   };
 }
 
+function formatarDica(texto: string): { titulo?: string; conteudo: string }[] {
+  if (!texto) return [];
+
+  // Divide por ponto final seguido de maiúscula ou por quebra de linha
+  const blocos = texto
+    .split(/(?<=\.)\s+(?=[A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇ])|(?:\.\s*\n)|(\n)/)
+    .filter(Boolean)
+    .map((b) => b.trim())
+    .filter((b) => b.length > 2);
+
+  return blocos.map((bloco) => {
+    // Detecta padrão "Título: conteúdo"
+    const match = bloco.match(/^([^:]{3,40}):\s*(.+)$/s);
+    if (match) {
+      return { titulo: match[1].trim(), conteudo: match[2].trim() };
+    }
+    return { conteudo: bloco };
+  });
+}
+
 export default function TelaRefeicoes() {
   const { paciente } = useApp();
   const [abaAtiva, setAbaAtiva] = useState<TipoRefeicao>("cafe");
   const [plano, setPlano] = useState<RefeicaoPlano[]>([]);
+  const [abasDisponiveis, setAbasDisponiveis] = useState<
+    { tipo: TipoRefeicao; icone: string; label: string }[]
+  >([]);
   const [opcaoAberta, setOpcaoAberta] = useState<number | null>(null);
   const [carregando, setCarregando] = useState(true);
+  const [dicaAberta, setDicaAberta] = useState<string | null>(null);
+  const [sobremesaDisponivel, setSobremesaDisponivel] = useState(true);
+  const [sobremesaInfo, setSobremesaInfo] = useState({ usadas: 0, limite: 0 });
+
+  function gerarAbas(plano: RefeicaoPlano[]) {
+    return TODAS_ABAS.filter((aba) =>
+      plano.some(
+        (refeicao) =>
+          refeicao.tipo === aba.tipo &&
+          refeicao.opcoes?.some((opcao) => opcao.itens?.length > 0),
+      ),
+    );
+  }
 
   useEffect(() => {
     async function carregar() {
@@ -140,28 +186,61 @@ export default function TelaRefeicoes() {
         if (dados.length > 0) {
           const formatado: RefeicaoPlano[] = dados.map(
             (r: Record<string, unknown>) => {
-              const opcoes = (r.opcoes as OpcaoRefeicao[] | null) ?? [];
+              const opcoes =
+                (r.opcoes as Array<{
+                  numero: number;
+                  itens: Array<{
+                    nome: string;
+                    quantidade: string;
+                    alternativas?: Array<{ nome: string; quantidade: string }>;
+                  }>;
+                  observacoes?: string;
+                }>) ?? [];
+
               return {
                 tipo: r.tipo as TipoRefeicao,
                 horario: r.horario as string,
                 opcoes: opcoes.map((op, idx) => ({
-                  numero: idx + 1,
-                  itens: (op.itens ?? []).map((item: ItemRefeicao) =>
-                    parseItem(item.nome),
-                  ),
-                  observacoes: op.observacoes,
+                  numero: op.numero ?? idx + 1,
+                  itens: (op.itens ?? []).map((item) => ({
+                    nome: item.nome,
+                    quantidade: item.quantidade,
+                    observacao: (item as Record<string, unknown>).observacao as
+                      | string
+                      | undefined,
+                    alternativas: item.alternativas?.map((alt) => ({
+                      nome: alt.nome,
+                      quantidade: alt.quantidade,
+                    })),
+                    selecionado: item.alternativas ? 0 : undefined,
+                  })),
+                  observacoes: op.observacoes ?? "",
                   concluida: false,
+                  bloqueada: false,
                 })),
                 observacoes: r.observacoes as string,
               };
             },
           );
           setPlano(formatado);
+          setAbasDisponiveis(gerarAbas(formatado));
+
+          const abas = TODAS_ABAS.filter((aba) =>
+            formatado.some(
+              (refeicao) =>
+                refeicao.tipo === aba.tipo &&
+                refeicao.opcoes?.some((opcao) => opcao.itens?.length > 0),
+            ),
+          );
+
+          setAbasDisponiveis(abas);
         } else {
           setPlano(PLANO_EXEMPLO);
+          setAbasDisponiveis(gerarAbas(PLANO_EXEMPLO));
         }
       } catch {
         setPlano(PLANO_EXEMPLO);
+        setAbasDisponiveis(gerarAbas(PLANO_EXEMPLO));
       } finally {
         setCarregando(false);
       }
@@ -219,6 +298,13 @@ export default function TelaRefeicoes() {
 
     // Salva no Supabase em background
     await registrarRefeicaoConfirmada(paciente.id, abaAtiva, opcaoIdx + 1);
+
+    if (abaAtiva === "sobremesa") {
+      await registrarUsoSobremesa(paciente.id);
+      const info = await verificarSobremesaDisponivel(paciente.id);
+      setSobremesaDisponivel(info.disponivel);
+      setSobremesaInfo({ usadas: info.usadas, limite: info.limite });
+    }
   }
 
   function opcaoProntoParaConcluir(opcao: OpcaoRefeicao): boolean {
@@ -246,24 +332,48 @@ export default function TelaRefeicoes() {
         <h1 className="text-xl font-bold text-gray-800 mb-4">Refeições 🍽️</h1>
 
         {/* Abas — todas visíveis sem scroll */}
-        <div className="grid grid-cols-5 gap-1">
-          {ABAS.map((aba) => (
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(70px,1fr))] gap-1">
+          {abasDisponiveis.map((aba) => (
             <button
               key={aba.tipo}
               onClick={() => {
+                if (
+                  aba.tipo === "sobremesa" &&
+                  !sobremesaDisponivel &&
+                  sobremesaInfo.limite > 0
+                )
+                  return;
                 setAbaAtiva(aba.tipo);
                 setOpcaoAberta(null);
               }}
               className={`flex flex-col items-center gap-0.5 py-2 px-1 rounded-xl
-                text-xs font-medium transition-all
-                ${
-                  abaAtiva === aba.tipo
-                    ? "bg-green-500 text-white shadow-sm"
-                    : "bg-gray-100 text-gray-500"
-                }`}
+      text-xs font-medium transition-all relative
+      ${
+        abaAtiva === aba.tipo
+          ? "bg-green-500 text-white shadow-sm"
+          : aba.tipo === "sobremesa" &&
+              !sobremesaDisponivel &&
+              sobremesaInfo.limite > 0
+            ? "bg-gray-100 text-gray-300 cursor-not-allowed"
+            : "bg-gray-100 text-gray-500"
+      }`}
             >
-              <span className="text-lg">{aba.icone}</span>
+              <span className="text-lg">
+                {aba.tipo === "sobremesa" &&
+                !sobremesaDisponivel &&
+                sobremesaInfo.limite > 0
+                  ? "🚫"
+                  : aba.icone}
+              </span>
               <span>{aba.label}</span>
+              {aba.tipo === "sobremesa" && sobremesaInfo.limite > 0 && (
+                <span
+                  className={`text-xs font-bold
+        ${sobremesaDisponivel ? "text-green-600" : "text-gray-400"}`}
+                >
+                  {sobremesaInfo.usadas}/{sobremesaInfo.limite}
+                </span>
+              )}
             </button>
           ))}
         </div>
@@ -285,8 +395,11 @@ export default function TelaRefeicoes() {
               </div>
             </div>
             <p className="font-bold text-lg">
-              {refeicaoAtiva.horario} —{" "}
-              {ABAS.find((a) => a.tipo === abaAtiva)?.label}
+              {abaAtiva === "sobremesa"
+                ? "Sobremesa"
+                : `${refeicaoAtiva.horario} — ${
+                    TODAS_ABAS.find((a) => a.tipo === abaAtiva)?.label
+                  }`}
             </p>
           </div>
         )}
@@ -383,7 +496,7 @@ export default function TelaRefeicoes() {
                                   >
                                     <span
                                       className="w-5 h-5 rounded-full bg-green-500
-                      flex items-center justify-center flex-shrink-0"
+                      flex items-center justify-center shrink-0"
                                     >
                                       <span className="text-white text-xs font-bold">
                                         ✓
@@ -420,7 +533,8 @@ export default function TelaRefeicoes() {
 
                                 return (
                                   <div key={itemIdx}>
-                                    <div className="flex items-center gap-2 mb-2">
+                                    {/* Título da categoria */}
+                                    <div className="flex items-center gap-2 mb-1">
                                       <span className="text-lg">
                                         {cat.icone}
                                       </span>
@@ -429,7 +543,20 @@ export default function TelaRefeicoes() {
                                       </p>
                                     </div>
 
-                                    <div className="grid gap-2">
+                                    {/* Observação do grupo — aparece logo abaixo do título */}
+                                    {item.observacao && (
+                                      <div className="flex items-start gap-1.5 mb-2 ml-7">
+                                        <span className="text-blue-400 text-xs mt-0.5">
+                                          ℹ️
+                                        </span>
+                                        <p className="text-xs text-blue-500 leading-snug">
+                                          {item.observacao}
+                                        </p>
+                                      </div>
+                                    )}
+
+                                    {/* Alternativas */}
+                                    <div className="grid gap-2 mb-1">
                                       {item.alternativas!.map((alt, altIdx) => {
                                         const selecionado =
                                           item.selecionado === altIdx;
@@ -443,30 +570,29 @@ export default function TelaRefeicoes() {
                                                 altIdx,
                                               )
                                             }
-                                            className={`text-left rounded-2xl border-2 px-4 py-3
-                              transition-all
-                              ${
-                                selecionado
-                                  ? "border-green-500 bg-green-50"
-                                  : "border-gray-100 bg-white hover:border-green-200"
-                              }`}
+                                            className={`text-left rounded-2xl border-2 px-4 py-3 transition-all
+                ${
+                  selecionado
+                    ? "border-green-500 bg-green-50"
+                    : "border-gray-100 bg-white hover:border-green-200"
+                }`}
                                           >
                                             <div className="flex items-center gap-3">
                                               <div
                                                 className={`w-6 h-6 rounded-full flex items-center
-                                justify-center text-xs font-bold flex-shrink-0
-                                ${
-                                  selecionado
-                                    ? "bg-green-500 text-white"
-                                    : "bg-gray-100 text-gray-400"
-                                }`}
+                  justify-center text-xs font-bold shrink-0
+                  ${
+                    selecionado
+                      ? "bg-green-500 text-white"
+                      : "bg-gray-100 text-gray-400"
+                  }`}
                                               >
                                                 {selecionado ? "✓" : ""}
                                               </div>
                                               <div>
                                                 <p
                                                   className={`text-sm font-medium
-                                  ${selecionado ? "text-green-800" : "text-gray-700"}`}
+                    ${selecionado ? "text-green-800" : "text-gray-700"}`}
                                                 >
                                                   {alt.nome}
                                                 </p>
@@ -492,11 +618,90 @@ export default function TelaRefeicoes() {
 
                     {/* Observações */}
                     {opcao.observacoes && (
-                      <div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 mb-4">
-                        <p className="text-xs text-amber-700">
-                          💡 {opcao.observacoes}
-                        </p>
-                      </div>
+                      <>
+                        {/* Card de dica — clicável para expandir */}
+                        <button
+                          onClick={() =>
+                            setDicaAberta(
+                              dicaAberta === `${opcaoIdx}`
+                                ? null
+                                : `${opcaoIdx}`,
+                            )
+                          }
+                          className="w-full bg-amber-50 border border-amber-200 rounded-xl
+        px-3 py-2 mb-4 text-left transition-all hover:bg-amber-100"
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm">💡</span>
+                              <p className="text-xs text-amber-700 font-medium">
+                                Dicas desta opção
+                              </p>
+                            </div>
+                            <span className="text-amber-500 text-xs">
+                              {dicaAberta === `${opcaoIdx}` ? "∨" : ">"}
+                            </span>
+                          </div>
+                          {/* Preview — só primeira linha */}
+                          {dicaAberta !== `${opcaoIdx}` && (
+                            <p className="text-xs text-amber-600 mt-1 line-clamp-1 opacity-70">
+                              {opcao.observacoes.split("\n")[0].slice(0, 60)}...
+                            </p>
+                          )}
+                        </button>
+
+                        {/* Popup modal com dica completa */}
+                        {dicaAberta === `${opcaoIdx}` && (
+                          <div
+                            className="fixed inset-0 bg-black/40 z-50 flex items-end"
+                            onClick={() => setDicaAberta(null)}
+                          >
+                            <div
+                              className="bg-white w-full max-w-107.5 mx-auto rounded-t-3xl
+            p-6 max-h-[70vh] overflow-y-auto"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <div className="flex items-center justify-between mb-4">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xl">💡</span>
+                                  <h3 className="font-bold text-gray-800">
+                                    Dicas desta opção
+                                  </h3>
+                                </div>
+                                <button
+                                  onClick={() => setDicaAberta(null)}
+                                  className="w-8 h-8 rounded-full bg-gray-100 flex items-center
+                justify-center text-gray-500 text-lg"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+
+                              {/* Renderiza o texto com formatação */}
+                              <div className="space-y-3">
+                                {formatarDica(opcao.observacoes).map(
+                                  (bloco, i) => (
+                                    <div key={i}>
+                                      {bloco.titulo ? (
+                                        <p className="text-sm text-gray-700 leading-relaxed">
+                                          <span className="font-bold text-gray-900">
+                                            {bloco.titulo}:
+                                          </span>{" "}
+                                          {bloco.conteudo}
+                                        </p>
+                                      ) : (
+                                        <p className="text-sm text-gray-700 leading-relaxed">
+                                          {bloco.conteudo}
+                                        </p>
+                                      )}
+                                    </div>
+                                  ),
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </>
                     )}
 
                     {/* Botão Fiz essa! */}
@@ -636,3 +841,74 @@ const PLANO_EXEMPLO: RefeicaoPlano[] = [
     ],
   },
 ];
+// Retorna a semana atual no formato "2026-W22"
+function semanaAtual(): string {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), 0, 1);
+  const week = Math.ceil(
+    ((now.getTime() - start.getTime()) / 86400000 + start.getDay() + 1) / 7,
+  );
+  return `${now.getFullYear()}-W${String(week).padStart(2, "0")}`;
+}
+// Verifica se a sobremesa ainda está disponível esta semana
+async function verificarSobremesaDisponivel(
+  pacienteId: string,
+): Promise<{ disponivel: boolean; usadas: number; limite: number }> {
+  const semana = semanaAtual();
+
+  // Busca o limite do plano
+  const { data: plano } = await supabase
+    .from("refeicoes_plano")
+    .select("frequencia_semanal")
+    .eq("paciente_id", pacienteId)
+    .eq("tipo", "sobremesa")
+    .single();
+
+  const limite = plano?.frequencia_semanal ?? 0;
+  if (limite === 0) return { disponivel: false, usadas: 0, limite: 0 };
+
+  // Busca quantas já foram usadas esta semana
+  const { data: controle } = await supabase
+    .from("refeicoes_controle_semanal")
+    .select("quantidade_usada")
+    .eq("paciente_id", pacienteId)
+    .eq("tipo", "sobremesa")
+    .eq("semana", semana)
+    .single();
+
+  const usadas = controle?.quantidade_usada ?? 0;
+  return { disponivel: usadas < limite, usadas, limite };
+}
+
+// Registra uso de sobremesa
+async function registrarUsoSobremesa(pacienteId: string): Promise<void> {
+  const semana = semanaAtual();
+
+  await supabase.from("refeicoes_controle_semanal").upsert(
+    {
+      paciente_id: pacienteId,
+      tipo: "sobremesa",
+      semana,
+      quantidade_usada: 1,
+    },
+    { onConflict: "paciente_id,tipo,semana" },
+  );
+
+  // Se já existe, incrementa
+  const { data } = await supabase
+    .from("refeicoes_controle_semanal")
+    .select("quantidade_usada")
+    .eq("paciente_id", pacienteId)
+    .eq("tipo", "sobremesa")
+    .eq("semana", semana)
+    .single();
+
+  if (data && data.quantidade_usada >= 1) {
+    await supabase
+      .from("refeicoes_controle_semanal")
+      .update({ quantidade_usada: data.quantidade_usada + 1 })
+      .eq("paciente_id", pacienteId)
+      .eq("tipo", "sobremesa")
+      .eq("semana", semana);
+  }
+}

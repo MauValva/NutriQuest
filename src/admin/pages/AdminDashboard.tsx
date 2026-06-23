@@ -38,6 +38,15 @@ export default function AdminDashboard({
     emagrecer: { label: "Emagrecer", cor: "bg-blue-100 text-blue-700" },
     manter: { label: "Manter", cor: "bg-green-100 text-green-700" },
     ganhar: { label: "Ganhar", cor: "bg-orange-100 text-orange-700" },
+    performance: {
+      label: "Performance",
+      cor: "bg-purple-100 text-purple-700",
+    },
+
+    preparacao_prova: {
+      label: "Preparação prova",
+      cor: "bg-red-100 text-red-700",
+    },
   };
 
   return (

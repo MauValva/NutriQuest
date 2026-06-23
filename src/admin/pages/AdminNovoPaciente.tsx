@@ -17,7 +17,7 @@ export default function AdminNovoPaciente({
   const [email, setEmail] = useState("");
   const [peso, setPeso] = useState("");
   const [altura, setAltura] = useState("");
-  const [idade, setIdade] = useState("");
+  const [dataNascimento, setDataNascimento] = useState("");
   const [objetivo, setObjetivo] = useState<"emagrecer" | "manter" | "ganhar">(
     "manter",
   );
@@ -41,7 +41,7 @@ export default function AdminNovoPaciente({
       senha_temp: senha,
       peso: Number(peso),
       altura: Number(altura),
-      idade: Number(idade),
+      data_nascimento: dataNascimento,
       objetivo,
       observacoes_anamnese: "",
     });
@@ -63,7 +63,7 @@ export default function AdminNovoPaciente({
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <div className="bg-white shadow-sm px-6 py-4 flex items-center gap-4">
+      <div className="bg-white shadow-sm px-6 py-4 flex items-center gap-4 sticky top-0 z-10">
         <button
           onClick={onVoltar}
           className="text-gray-400 hover:text-gray-600 text-xl"
@@ -127,16 +127,16 @@ export default function AdminNovoPaciente({
                 placeholder: "1.70",
               },
               {
-                label: "Idade",
-                value: idade,
-                setter: setIdade,
-                placeholder: "30",
+                label: "Data de Nascimento",
+                value: dataNascimento,
+                setter: setDataNascimento,
+                placeholder: "",
               },
             ].map((f) => (
               <div key={f.label}>
                 <label className="text-xs text-gray-400">{f.label}</label>
                 <input
-                  type="number"
+                  type={f.label === "Data de nascimento" ? "date" : "number"}
                   value={f.value}
                   onChange={(e) => f.setter(e.target.value)}
                   placeholder={f.placeholder}

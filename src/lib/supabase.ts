@@ -22,8 +22,13 @@ export interface Paciente {
   senha_temp: string;
   peso: number;
   altura: number;
-  idade: number;
-  objetivo: "emagrecer" | "manter" | "ganhar";
+  data_nascimento?: string | null;
+  objetivo:
+    | "emagrecer"
+    | "manter"
+    | "ganhar"
+    | "performance"
+    | "preparacao_prova";
   observacoes_anamnese: string;
   ativa: boolean;
 }
@@ -44,7 +49,7 @@ export interface MissaoDB {
 export interface RefeicaoPlano {
   id: string;
   paciente_id: string;
-  tipo: "cafe" | "almoco" | "sobremesa" | "lanche" | "jantar";
+  tipo: "cafe" | "almoco" | "sobremesa" | "lanche" | "jantar" | "complemento";
   horario: string;
   opcoes: OpcaoRefeicao[];
   observacoes: string;
@@ -60,4 +65,26 @@ export interface ItemRefeicao {
   nome: string;
   quantidade: string;
   alternativas?: string[];
+}
+
+export interface PacienteTag {
+  id: string;
+  paciente_id: string;
+  tag_id: string;
+  created_at?: string;
+
+  tags?: {
+    id: string;
+    nome: string;
+    emoji: string;
+    categoria: string;
+  };
+}
+
+export interface Tag {
+  id: string;
+  nome: string;
+  emoji: string;
+  categoria: string;
+  ativa: boolean;
 }

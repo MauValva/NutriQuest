@@ -13,7 +13,7 @@ export default function NavegacaoInferior() {
 
   return (
     <div
-      className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[430px]
+      className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-107.5
       bg-white border-t border-gray-100 shadow-lg z-40"
     >
       <div className="flex">

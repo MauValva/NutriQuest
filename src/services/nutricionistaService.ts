@@ -84,16 +84,133 @@ export async function salvarPlanoAlimentar(
   refeicoes: Array<{
     tipo: string;
     horario: string;
-    opcoes: object;
-    observacoes: string;
+    opcao?: number;
+    itens?: unknown[];
+    opcoes?: unknown;
+    observacoes?: string;
+    frequencia_semanal?: number;
   }>,
 ): Promise<boolean> {
   // Remove plano anterior
   await supabase.from("refeicoes_plano").delete().eq("paciente_id", pacienteId);
 
-  const { error } = await supabase
-    .from("refeicoes_plano")
-    .insert(refeicoes.map((r) => ({ ...r, paciente_id: pacienteId })));
+  // Agrupa por tipo — cada tipo vira um registro com todas as opções
+  const agrupado: Record<
+    string,
+    {
+      tipo: string;
+      horario: string;
+      opcoes: unknown[];
+      observacoes: string;
+      frequencia_semanal?: number;
+    }
+  > = {};
+
+  for (const r of refeicoes) {
+    // Se a refeição não tem itens, não cria no plano
+    if (!r.itens || r.itens.length === 0) {
+      continue;
+    }
+
+    if (!agrupado[r.tipo]) {
+      agrupado[r.tipo] = {
+        tipo: r.tipo,
+        horario: r.horario,
+        opcoes: [],
+        observacoes: "",
+        frequencia_semanal: r.frequencia_semanal,
+      };
+    }
+
+    agrupado[r.tipo].opcoes.push({
+      numero: r.opcao ?? agrupado[r.tipo].opcoes.length + 1,
+      itens: r.itens,
+      observacoes: r.observacoes ?? "",
+    });
+
+    if (agrupado[r.tipo].opcoes.length === 1) {
+      agrupado[r.tipo].horario = r.horario;
+    }
+  }
+
+  const registros = Object.values(agrupado)
+    .filter((r) => r.opcoes.length > 0)
+    .map((r) => ({
+      paciente_id: pacienteId,
+      tipo: r.tipo,
+      horario: r.horario,
+      opcoes: r.opcoes,
+      observacoes: r.observacoes,
+      frequencia_semanal: r.frequencia_semanal ?? null,
+    }));
+  const { error } = await supabase.from("refeicoes_plano").insert(registros);
+
+  if (error) {
+    console.error("Erro ao salvar plano:", error);
+    return false;
+  }
+
+  return true;
+}
+// ── Buscar catálogo de missões ────────────────────────
+export async function buscarCatalogoMissoes() {
+  const { data, error } = await supabase
+    .from("missoes_catalogo")
+    .select("*")
+    .eq("ativa", true)
+    .order("tipo")
+    .order("xp_recompensa");
+
+  if (error || !data) return [];
+  return data;
+}
+
+// ── Salvar missões selecionadas do catálogo ───────────
+export async function salvarMissoesDoCatalogo(
+  pacienteId: string,
+  missaoIds: string[],
+): Promise<boolean> {
+  // Busca as missões selecionadas do catálogo
+  const { data: catalogo, error: erroCatalogo } = await supabase
+    .from("missoes_catalogo")
+    .select("*")
+    .in("id", missaoIds);
+
+  if (erroCatalogo || !catalogo) return false;
+
+  // Insere como missões do paciente
+  const { error } = await supabase.from("missoes").insert(
+    catalogo.map((m) => ({
+      paciente_id: pacienteId,
+      titulo: m.titulo,
+      descricao: m.descricao,
+      tipo: m.tipo,
+      icone: m.icone,
+      xp_recompensa: m.xp_recompensa,
+      prioridade: 5,
+      aprovada_nutri: true,
+      ativa: true,
+    })),
+  );
 
   return !error;
+}
+
+export async function atualizarPaciente(
+  pacienteId: string,
+  dados: Partial<Paciente>,
+) {
+  const { data, error } = await supabase
+    .from("pacientes")
+    .update(dados)
+    .eq("id", pacienteId)
+    .select()
+    .single();
+
+  if (error) {
+    console.error("Erro ao atualizar paciente:", error);
+    return null;
+  }
+
+  return data as Paciente;
 }

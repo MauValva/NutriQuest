@@ -3,25 +3,20 @@ import type { Nutricionista, Paciente } from "../../lib/supabase";
 import {
   extrairTextoPDF,
   extrairDadosAnamneseComIA,
-  gerarMissoesComIA,
-  extrairRefeicoesComIA,
-  type MissaoGerada,
+  extrairRefeicoesPorRegex,
 } from "../../services/pdfService";
 import {
   cadastrarPaciente,
-  salvarMissoes,
-  atualizarMissao,
-  deletarMissao,
   salvarPlanoAlimentar,
+  atualizarPaciente,
 } from "../../services/nutricionistaService";
-
-type MissaoSugerida = MissaoGerada;
 
 interface DadosExtraidos {
   nome: string;
   peso: number;
   altura: number;
   idade: number;
+  data_nascimento?: string | null;
   objetivo: "emagrecer" | "manter" | "ganhar";
   dificuldades: {
     agua: boolean;
@@ -41,17 +36,10 @@ interface DadosExtraidos {
 interface Props {
   nutri: Nutricionista;
   onVoltar: () => void;
-  onConcluido: () => void;
+  onConcluido: (paciente: Paciente) => void; // agora recebe o paciente
 }
 
 type Etapa = "upload" | "processando" | "revisao" | "salvo";
-
-const TIPO_LABEL: Record<string, { label: string; cor: string }> = {
-  hidratacao: { label: "Hidratação", cor: "bg-blue-100 text-blue-700" },
-  alimentacao: { label: "Alimentação", cor: "bg-green-100 text-green-700" },
-  atividade: { label: "Atividade", cor: "bg-orange-100 text-orange-700" },
-  educacional: { label: "Educacional", cor: "bg-purple-100 text-purple-700" },
-};
 
 function gerarEmailSugerido(nome: string): string {
   const partes = nome
@@ -82,7 +70,6 @@ export default function AdminUploadPaciente({
   const [arquivoAnamnese, setArquivoAnamnese] = useState<File | null>(null);
   const [arquivoPlano, setArquivoPlano] = useState<File | null>(null);
   const [dados, setDados] = useState<DadosExtraidos | null>(null);
-  const [missoes, setMissoes] = useState<MissaoSugerida[]>([]);
   const [pacienteCriado, setPacienteCriado] = useState<Paciente | null>(null);
   const [erro, setErro] = useState("");
   const [salvando, setSalvando] = useState(false);
@@ -92,7 +79,7 @@ export default function AdminUploadPaciente({
   const [senha, setSenha] = useState("");
   const [peso, setPeso] = useState("");
   const [altura, setAltura] = useState("");
-  const [idade, setIdade] = useState("");
+  const [dataNascimento, setDataNascimento] = useState("");
   const [objetivo, setObjetivo] = useState<"emagrecer" | "manter" | "ganhar">(
     "manter",
   );
@@ -127,7 +114,7 @@ export default function AdminUploadPaciente({
       setSenha(senhaGerada);
       setPeso(dadosAnamnese.peso > 0 ? String(dadosAnamnese.peso) : "");
       setAltura(dadosAnamnese.altura > 0 ? String(dadosAnamnese.altura) : "");
-      setIdade(dadosAnamnese.idade > 0 ? String(dadosAnamnese.idade) : "");
+      setDataNascimento(dadosAnamnese.data_nascimento ?? "");
       setObjetivo(dadosAnamnese.objetivo);
 
       // ETAPA 2 — Cadastrar paciente
@@ -138,7 +125,7 @@ export default function AdminUploadPaciente({
         senha_temp: senhaGerada,
         peso: dadosAnamnese.peso,
         altura: dadosAnamnese.altura,
-        idade: dadosAnamnese.idade ?? 0,
+        data_nascimento: dadosAnamnese.data_nascimento ?? null,
         objetivo: dadosAnamnese.objetivo,
         observacoes_anamnese: textoAnamnese.slice(0, 2000),
       });
@@ -151,29 +138,21 @@ export default function AdminUploadPaciente({
 
       setPacienteCriado(paciente);
 
-      // ETAPA 3 — Plano alimentar (separado da anamnese)
+      // ETAPA 3 — Plano alimentar com regex
       if (arquivoPlano) {
-        setProgressoMsg("🥗 Lendo plano alimentar... (pode levar ~30s)");
+        setProgressoMsg("🥗 Lendo plano alimentar...");
         try {
           const textoPlano = await extrairTextoPDF(arquivoPlano);
-          const refeicoes = await extrairRefeicoesComIA(textoPlano);
+          const refeicoes = extrairRefeicoesPorRegex(textoPlano);
+
           if (refeicoes.length > 0) {
             await salvarPlanoAlimentar(paciente.id, refeicoes);
           }
         } catch (e) {
-          console.warn(
-            "Erro ao processar plano alimentar — continuando sem ele:",
-            e,
-          );
-          // Não bloqueia o fluxo — missões ainda serão geradas
+          console.warn("Erro ao processar plano alimentar:", e);
         }
       }
 
-      // ETAPA 4 — Missões com IA
-      setProgressoMsg("🎯 Gerando missões personalizadas...");
-      const sugeridas = await gerarMissoesComIA(paciente.id, dadosAnamnese);
-      await salvarMissoes(sugeridas);
-      setMissoes(sugeridas);
       setEtapa("revisao");
     } catch (e) {
       console.error(e);
@@ -182,47 +161,38 @@ export default function AdminUploadPaciente({
     }
   }
 
-  function aprovarMissao(index: number) {
-    setMissoes((prev) =>
-      prev.map((m, i) => (i === index ? { ...m, aprovada_nutri: true } : m)),
-    );
-  }
-
-  function reprovarMissao(index: number) {
-    setMissoes((prev) =>
-      prev.map((m, i) => (i === index ? { ...m, aprovada_nutri: false } : m)),
-    );
-  }
-
-  function removerMissao(index: number) {
-    setMissoes((prev) => prev.filter((_, i) => i !== index));
-  }
-
   async function salvarTudo() {
     if (!pacienteCriado) return;
+
     setSalvando(true);
 
-    for (const missao of missoes) {
-      if (missao.id) {
-        if (missao.aprovada_nutri) {
-          await atualizarMissao(missao.id, { aprovada_nutri: true });
-        } else {
-          await deletarMissao(missao.id);
-        }
-      }
+    const atualizado = await atualizarPaciente(pacienteCriado.id, {
+      nome,
+      email,
+      peso: Number(peso),
+      altura: Number(altura),
+      objetivo,
+      data_nascimento: dataNascimento || null,
+    });
+
+    if (!atualizado) {
+      setErro("Erro ao salvar alterações");
+      setSalvando(false);
+      return;
     }
+
+    setPacienteCriado(atualizado);
 
     setSalvando(false);
     setEtapa("salvo");
   }
 
-  const aprovadas = missoes.filter((m) => m.aprovada_nutri).length;
   const primeiroNome = nome.split(" ")[0] || "Paciente";
 
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <div className="bg-white shadow-sm px-6 py-4 flex items-center gap-4">
+      <div className="bg-white shadow-sm px-6 py-4 flex items-center gap-4 sticky top-0 z-10">
         <button
           onClick={onVoltar}
           className="text-gray-400 hover:text-gray-600 text-xl"
@@ -407,20 +377,36 @@ export default function AdminUploadPaciente({
                   </p>
                 </div>
 
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-3 gap-2">
                   {[
-                    { label: "Peso (kg)", value: peso, setter: setPeso },
-                    { label: "Altura (m)", value: altura, setter: setAltura },
-                    { label: "Idade", value: idade, setter: setIdade },
+                    {
+                      label: "Peso (kg)",
+                      value: peso,
+                      setter: setPeso,
+                      type: "number",
+                    },
+                    {
+                      label: "Altura (m)",
+                      value: altura,
+                      setter: setAltura,
+                      type: "number",
+                    },
+                    {
+                      label: "Nascimento",
+                      value: dataNascimento,
+                      setter: setDataNascimento,
+                      type: "date",
+                    },
                   ].map((f) => (
-                    <div key={f.label}>
+                    <div key={f.label} className="min-w-0">
                       <label className="text-xs text-gray-400">{f.label}</label>
+
                       <input
-                        type="number"
+                        type={f.type}
                         value={f.value}
                         onChange={(e) => f.setter(e.target.value)}
-                        className="w-full mt-1 border border-gray-200 rounded-xl px-3 py-2
-                          outline-none focus:border-green-400 text-sm text-center"
+                        className="w-full min-w-0 mt-1 border border-gray-200 rounded-xl
+        px-1 py-2 outline-none focus:border-green-400 text-xs text-center"
                       />
                     </div>
                   ))}
@@ -517,102 +503,15 @@ export default function AdminUploadPaciente({
                 )}
               </div>
             </div>
-
-            {/* Missões sugeridas */}
-            <div className="bg-white rounded-2xl p-5 shadow-sm">
-              <h2 className="font-bold text-gray-700 mb-1">
-                🎯 Missões sugeridas — revise e aprove
-              </h2>
-              <p className="text-xs text-gray-400 mb-4">
-                Geradas com IA com base na anamnese. Clique no círculo para
-                aprovar, no ✕ para remover.
-              </p>
-
-              <div className="space-y-3">
-                {missoes.map((missao, index) => (
-                  <div
-                    key={index}
-                    className={`rounded-xl p-4 border-2 transition-all
-                      ${
-                        missao.aprovada_nutri
-                          ? "border-green-400 bg-green-50"
-                          : "border-gray-100 bg-gray-50"
-                      }`}
-                  >
-                    <div className="flex items-start gap-3">
-                      <span className="text-2xl">{missao.icone}</span>
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1 flex-wrap">
-                          <p className="font-semibold text-gray-800 text-sm">
-                            {missao.titulo}
-                          </p>
-                          <span
-                            className={`text-xs px-2 py-0.5 rounded-full
-                            ${TIPO_LABEL[missao.tipo]?.cor}`}
-                          >
-                            {TIPO_LABEL[missao.tipo]?.label}
-                          </span>
-                        </div>
-                        <p className="text-gray-500 text-xs">
-                          {missao.descricao}
-                        </p>
-                        <div className="flex items-center gap-3 mt-2">
-                          <span className="text-green-600 text-xs font-bold">
-                            +{missao.xp_recompensa} XP
-                          </span>
-                          <span className="text-gray-300 text-xs">
-                            Prioridade: {missao.prioridade}/10
-                          </span>
-                        </div>
-                      </div>
-                      <div className="flex flex-col gap-1">
-                        <button
-                          onClick={() =>
-                            missao.aprovada_nutri
-                              ? reprovarMissao(index)
-                              : aprovarMissao(index)
-                          }
-                          className={`w-8 h-8 rounded-full border-2 flex items-center
-                            justify-center text-sm transition-all
-                            ${
-                              missao.aprovada_nutri
-                                ? "bg-green-500 border-green-500 text-white"
-                                : "border-gray-300 hover:border-green-400"
-                            }`}
-                        >
-                          {missao.aprovada_nutri ? "✓" : ""}
-                        </button>
-                        <button
-                          onClick={() => removerMissao(index)}
-                          className="w-8 h-8 rounded-full border-2 border-red-200
-                            text-red-300 hover:bg-red-50 hover:text-red-500
-                            flex items-center justify-center text-sm transition-all"
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="bg-green-50 border border-green-200 rounded-2xl p-4">
-              <p className="text-sm text-green-700">
-                <b>{aprovadas}</b> missões aprovadas de <b>{missoes.length}</b>{" "}
-                sugeridas
-              </p>
-            </div>
-
             <button
               onClick={salvarTudo}
-              disabled={salvando || aprovadas === 0}
+              disabled={salvando}
               className="w-full bg-green-500 text-white font-bold py-4 rounded-2xl
                 shadow-md active:scale-95 transition-all disabled:opacity-50"
             >
               {salvando
                 ? "💾 Salvando..."
-                : `Confirmar e enviar ${aprovadas} missões para ${primeiroNome}`}
+                : `Confirmar cadastro de ${primeiroNome}`}
             </button>
           </div>
         )}
@@ -625,8 +524,8 @@ export default function AdminUploadPaciente({
               {primeiroNome} está pronta!
             </h2>
             <p className="text-gray-400 text-sm mb-6">
-              Perfil criado e missões aprovadas. Envie os dados de acesso para
-              ela.
+              Perfil criado com sucesso. Envie os dados de acesso para a
+              paciente.
             </p>
             <div className="bg-green-50 border border-green-200 rounded-2xl p-5 mb-6 text-left">
               <p className="text-sm font-bold text-green-700 mb-3">
@@ -654,10 +553,10 @@ export default function AdminUploadPaciente({
               </div>
             </div>
             <button
-              onClick={onConcluido}
+              onClick={() => onConcluido(pacienteCriado!)}
               className="bg-green-500 text-white font-bold px-8 py-3 rounded-2xl"
             >
-              ← Voltar aos pacientes
+              Selecionar Missões →
             </button>
           </div>
         )}

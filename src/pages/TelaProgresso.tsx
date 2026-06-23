@@ -98,7 +98,7 @@ export default function TelaProgresso() {
   return (
     <div className="min-h-screen bg-gray-50 pb-24">
       {/* Header */}
-      <div className="bg-gradient-to-b from-green-600 to-green-500 px-5 pt-12 pb-8 text-white">
+      <div className="bg-linear-to-b from-green-600 to-green-500 px-5 pt-12 pb-8 text-white">
         <h1 className="text-xl font-bold mb-4">Meu Progresso 📊</h1>
 
         {/* Card do usuário */}

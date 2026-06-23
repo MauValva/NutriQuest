@@ -1,5 +1,22 @@
 import { useApp } from "../contexts/useApp";
 
+function calcularIdade(data?: string | null) {
+  if (!data) return null;
+
+  const hoje = new Date();
+  const nascimento = new Date(data);
+
+  let idade = hoje.getFullYear() - nascimento.getFullYear();
+
+  const mes = hoje.getMonth() - nascimento.getMonth();
+
+  if (mes < 0 || (mes === 0 && hoje.getDate() < nascimento.getDate())) {
+    idade--;
+  }
+
+  return idade;
+}
+
 export default function TelaPerfil() {
   const { xpTotal, nivel, streakDias, paciente } = useApp();
 
@@ -40,10 +57,33 @@ export default function TelaPerfil() {
       texto: "text-green-700",
       sub: "text-green-500",
     },
+    performance: {
+      icone: "🔥",
+      titulo: "Performance",
+      subtitulo: "Combustível para ir além dos limites",
+      desc: "Cada nutriente é estratégico. Você está otimizando seu corpo para render no máximo!",
+      gradiente: "from-purple-500 to-violet-400",
+      bg: "from-purple-50 to-violet-50",
+      borda: "border-purple-200",
+      texto: "text-purple-700",
+      sub: "text-purple-500",
+    },
+    preparacao_prova: {
+      icone: "🏃",
+      titulo: "Preparação para Prova",
+      subtitulo: "Nutrição afinada para o grande dia",
+      desc: "Cada refeição é parte do seu treino. Você está se preparando para cruzar a linha de chegada mais forte!",
+      gradiente: "from-red-500 to-rose-400",
+      bg: "from-red-50 to-rose-50",
+      borda: "border-red-200",
+      texto: "text-red-700",
+      sub: "text-red-500",
+    },
   };
 
   const obj = objetivoConfig[paciente.objetivo ?? "manter"];
   const primeiroNome = paciente.nome?.split(" ")[0] ?? "Paciente";
+  const idade = calcularIdade(paciente.data_nascimento);
 
   const dadosPessoais = [
     { icone: "👤", label: "Nome", valor: paciente.nome },
@@ -61,7 +101,7 @@ export default function TelaPerfil() {
     {
       icone: "🎂",
       label: "Idade",
-      valor: paciente.idade ? `${paciente.idade} anos` : "—",
+      valor: idade ? `${idade} anos` : "—",
     },
   ];
 
@@ -93,17 +133,17 @@ export default function TelaPerfil() {
 
         {/* Objetivo — card motivacional animado */}
         <div
-          className={`bg-gradient-to-br ${obj.bg} border ${obj.borda}
+          className={`bg-linear-to-br ${obj.bg} border ${obj.borda}
           rounded-3xl p-5 overflow-hidden relative`}
         >
           {/* Círculos decorativos de fundo */}
           <div
             className={`absolute -top-6 -right-6 w-24 h-24 rounded-full
-            bg-gradient-to-br ${obj.gradiente} opacity-10`}
+            bg-linear-to-br ${obj.gradiente} opacity-10`}
           />
           <div
             className={`absolute -bottom-4 -left-4 w-16 h-16 rounded-full
-            bg-gradient-to-br ${obj.gradiente} opacity-10`}
+            bg-linear-to-br ${obj.gradiente} opacity-10`}
           />
 
           <p
@@ -115,7 +155,7 @@ export default function TelaPerfil() {
           <div className="flex items-start gap-4">
             {/* Ícone animado */}
             <div
-              className={`w-16 h-16 rounded-2xl bg-gradient-to-br ${obj.gradiente}
+              className={`w-16 h-16 rounded-2xl bg-linear-to-br ${obj.gradiente}
               flex items-center justify-center text-3xl shadow-lg
               animate-bounce mt-4`}
               style={{ animationDuration: "2s" }}
@@ -144,7 +184,7 @@ export default function TelaPerfil() {
             </div>
             <div className="bg-white/60 rounded-full h-2.5 overflow-hidden">
               <div
-                className={`h-2.5 rounded-full bg-gradient-to-r ${obj.gradiente}
+                className={`h-2.5 rounded-full bg-linear-to-r ${obj.gradiente}
                   transition-all duration-700`}
                 style={{ width: `${progressoNivel * 100}%` }}
               />
@@ -174,7 +214,7 @@ export default function TelaPerfil() {
               >
                 <div
                   className="w-9 h-9 rounded-xl bg-gray-50
-                  flex items-center justify-center text-lg flex-shrink-0"
+                  flex items-center justify-center text-lg shrink-0"
                 >
                   {dado.icone}
                 </div>
@@ -201,7 +241,7 @@ export default function TelaPerfil() {
 
         {/* Mensagem motivacional */}
         <div
-          className={`bg-gradient-to-r ${obj.gradiente}
+          className={`bg-linear-to-r ${obj.gradiente}
           rounded-2xl p-4 text-center shadow-md`}
         >
           <p className="text-white font-bold text-sm">
