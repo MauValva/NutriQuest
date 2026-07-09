@@ -16,6 +16,7 @@ export interface Alternativa {
 export interface ItemRefeicao {
   nome: string;
   quantidade: string;
+  titulo?: string;
   alternativas?: Alternativa[];
   observacao?: string;
 }
@@ -31,22 +32,109 @@ export interface RefeicaoEstruturada {
 
 // ── Extrai texto bruto do PDF ─────────────────────────
 export async function extrairTextoPDF(arquivo: File): Promise<string> {
-  const arrayBuffer = await arquivo.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-  let textoCompleto = "";
+  console.log("🔵 extrairTextoPDF CHAMADO", arquivo.name);
+  try {
+    const arrayBuffer = await arquivo.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    let textoCompleto = "";
 
-  for (let i = 1; i <= pdf.numPages; i++) {
-    const pagina = await pdf.getPage(i);
-    const conteudo = await pagina.getTextContent();
-    const textoPagina = conteudo.items
-      .map((item: Record<string, unknown>) =>
-        typeof item["str"] === "string" ? item["str"] : "",
-      )
-      .join(" ");
-    textoCompleto += textoPagina + "\n";
+    interface ItemPosicionado {
+      texto: string;
+      x: number;
+      y: number;
+    }
+
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const pagina = await pdf.getPage(i);
+      const conteudo = await pagina.getTextContent();
+
+      const itensPosicionados: ItemPosicionado[] = conteudo.items
+        .map((item: Record<string, unknown>) => {
+          const texto = typeof item["str"] === "string" ? item["str"] : "";
+          const transform = item["transform"] as number[] | undefined;
+          if (!transform || !texto) return null;
+          // transform[4] = x, transform[5] = y (coordenadas do PDF)
+          return { texto, x: transform[4], y: transform[5] };
+        })
+        .filter((it): it is ItemPosicionado => it !== null);
+
+      // Agrupa itens que estão na MESMA linha (Y aproximado) e, dentro
+      // de cada linha, ordena por X — isso reconstrói a ordem de leitura
+      // real, independente da ordem em que o PDF os desenhou no stream.
+      // Sem isso, trechos em negrito/normal na mesma frase podem vir
+      // fora de ordem e o bullet "•" do próximo item cai no meio do atual.
+      const TOLERANCIA_Y = 2;
+      const linhasMap = new Map<number, ItemPosicionado[]>();
+
+      for (const item of itensPosicionados) {
+        let chave: number | undefined;
+        for (const k of linhasMap.keys()) {
+          if (Math.abs(k - item.y) <= TOLERANCIA_Y) {
+            chave = k;
+            break;
+          }
+        }
+        if (chave === undefined) chave = item.y;
+        if (!linhasMap.has(chave)) linhasMap.set(chave, []);
+        linhasMap.get(chave)!.push(item);
+      }
+
+      // PDF: Y maior = mais no topo da página → ordena decrescente
+      const linhasOrdenadas = Array.from(linhasMap.entries()).sort(
+        (a, b) => b[0] - a[0],
+      );
+
+      const textoPagina = linhasOrdenadas
+        .map(([, itens]) =>
+          itens
+            .sort((a, b) => a.x - b.x)
+            .map((it) => it.texto)
+            .join(" "),
+        )
+        .join("\n");
+
+      textoCompleto += textoPagina + "\n";
+    }
+    console.log("🟢 TEXTO COMPLETO EXTRAÍDO:\n", textoCompleto);
+    return textoCompleto;
+  } catch (e) {
+    console.error("🔴 ERRO DENTRO DE extrairTextoPDF:", e);
+    throw e;
   }
+}
 
-  return textoCompleto;
+// =========================
+// LIMPEZA DE CABEÇALHO/RODAPÉ — genérica para qualquer nutricionista
+// =========================
+// Este PDF é gerado por uma plataforma que sempre segue este template
+// de página, independente de quem é a nutricionista:
+//   [Nome]
+//   CRN[2|3] [número]
+//   whats: [número]
+//   Instagram: [@handle]
+//   ...conteúdo...
+//   Acesse o app e veja o conteúdo completo da sua consulta.
+//   Página X/Y | Paciente [nome] | Prescrito em: DD/MM/AAAA.
+//
+// Por isso removemos pelos RÓTULOS fixos da plataforma (CRN, whats:,
+// Instagram:, Página X/Y, Prescrito em:), nunca pelo nome da nutri
+// ou da paciente — assim funciona para qualquer nutricionista/paciente
+// sem precisar editar este arquivo de novo.
+function limparCabecalhoRodape(texto: string): string {
+  return (
+    texto
+      // Bloco de identidade da nutri: linha com nome + as 3 linhas seguintes
+      // fixas da plataforma (CRN, whats, Instagram)
+      .replace(
+        /^[^\n]*\n\s*CRN\d?\s*\d+\s*\n\s*whats:[^\n]*\n\s*Instagram:[^\n]*\n?/gim,
+        "",
+      )
+      .replace(/Acesse o app[^\n]*conteúdo completo[^\n]*\n?/gi, "")
+      .replace(
+        /Página\s+\d+\/\d+\s*\|\s*Paciente[^\n]*Prescrito em:[^\n]*\.\n?/gi,
+        "",
+      )
+  );
 }
 
 // ── Chama o Groq com um prompt ──────────────────────
@@ -136,72 +224,133 @@ IMPORTANTE:
   }
 }
 
+// =========================
+// CONFIGURAÇÃO DE TIPOS DE REFEIÇÃO
+// =========================
+type TipoRefeicao =
+  | "cafe"
+  | "almoco"
+  | "lanche"
+  | "jantar"
+  | "sobremesa"
+  | "complemento";
+
+interface TipoConfig {
+  tipo: TipoRefeicao;
+  regex: RegExp; // usado para IDENTIFICAR o nome cru capturado
+  nomeCanonico: string; // nome usado no texto normalizado
+  horarioPadrao: string; // usado só se o PDF não trouxer horário
+}
+
+const TIPOS: TipoConfig[] = [
+  {
+    tipo: "cafe",
+    regex: /café da manhã/i,
+    nomeCanonico: "Café da manhã",
+    horarioPadrao: "06:30",
+  },
+  {
+    tipo: "almoco",
+    regex: /almoço/i,
+    nomeCanonico: "Almoço",
+    horarioPadrao: "12:30",
+  },
+  {
+    tipo: "lanche",
+    regex: /lanche(?:\s+da\s+tarde)?/i,
+    nomeCanonico: "Lanche da tarde",
+    horarioPadrao: "16:30",
+  },
+  {
+    tipo: "jantar",
+    regex: /jantar/i,
+    nomeCanonico: "Jantar",
+    horarioPadrao: "19:30",
+  },
+  {
+    tipo: "sobremesa",
+    regex: /sobremesa/i,
+    nomeCanonico: "Sobremesa",
+    horarioPadrao: "14:00",
+  },
+  {
+    tipo: "complemento",
+    regex: /complemento/i,
+    nomeCanonico: "Complemento",
+    horarioPadrao: "21:00",
+  },
+];
+
+// Nomes possíveis, na ordem em que aparecem em TIPOS (mais específico primeiro:
+// "lanche da tarde" precisa ser tentado antes de cair só em "lanche")
+const NOMES_ALTERNATIVOS = [
+  "Café da manhã",
+  "Almoço",
+  "Lanche da tarde",
+  "Jantar",
+  "Sobremesa",
+  "Complemento",
+].join("|");
+
+// Cabeçalho genérico:
+// [HH:MM -] Nome [ (qualquer parêntese) ] [- Opção N] [Nx na semana]
+// Cada peça é OPCIONAL e independente das outras.
+const HEADER_REGEX = new RegExp(
+  `(?:(\\d{2}:\\d{2})\\s*-\\s*)?` +
+    `(${NOMES_ALTERNATIVOS})` +
+    `\\s*(?:\\([^)]*\\))?` +
+    `\\s*(?:-\\s*Opção\\s*(\\d+))?` +
+    `\\s*(?:(\\d+)\\s*x\\s*na\\s*semana)?`,
+  "g", // sem "i" — cabeçalhos de refeição vêm sempre com inicial maiúscula
+  // (Sobremesa, Complemento, Almoço, Jantar); minúsculo só ocorre
+  // como palavra comum no meio de frases (ex: "1 col. de sobremesa",
+  // "algum complemento", "almoço ou jantar" em observações) e nunca
+  // deve virar cabeçalho.
+);
+
+function getConfigPorNome(nomeCru: string): TipoConfig {
+  const config = TIPOS.find((t) => t.regex.test(nomeCru));
+  // fallback defensivo — não deve acontecer já que NOMES_ALTERNATIVOS
+  // é gerado a partir de TIPOS, mas evita undefined em produção
+  return config ?? TIPOS[3]; // jantar como fallback, igual ao comportamento antigo
+}
+
+// =========================
+// NORMALIZAÇÃO
+// =========================
 export function normalizarPlanoAlimentar(texto: string): string {
-  return (
-    texto
-      .replace(/Priscila Ferrão[\s\S]*?Prescrito em:.*?\./g, "")
-      .replace(/Acesse o app[\s\S]*?consulta\./g, "")
-      .replace(/Página\s+\d+\/\d+[\s\S]*?\d{4}\./g, "")
+  let limpo = limparCabecalhoRodape(texto);
 
-      // Café opção 1 — sem horário e sem número
-      .replace(
-        /(?<!\d{2}:\d{2}\s*-\s*)Café da manhã\s*(?!-\s*Opção)(?=\s*•)/gi,
-        "06:30 - Café da manhã - Opção 1 ",
-      )
-      .replace(
-        /(?<!\d{2}:\d{2}\s*-\s*)Café da manhã\s*-\s*Opção\s*(\d+)/gi,
-        "06:30 - Café da manhã - Opção $1",
-      )
+  limpo = limpo.replace(
+    HEADER_REGEX,
+    (_match, horario, nomeCru, opcao, freq) => {
+      const config = getConfigPorNome(nomeCru);
+      const horarioFinal = horario ?? config.horarioPadrao;
+      const opcaoFinal = opcao ?? "1";
 
-      // Almoço
-      .replace(
-        /12:30\s*-\s*Almoço(?!\s*-\s*Opção)/gi,
-        "12:30 - Almoço - Opção 1",
-      )
-      .replace(
-        /(?<!\d{2}:\d{2}\s*-\s*)Almoço\s*-\s*Opção\s*(\d+)/gi,
-        "12:30 - Almoço - Opção $1",
-      )
+      let freqTag = "";
+      if (freq) {
+        freqTag = ` [freq:${freq}]`;
+      } else if (config.tipo === "sobremesa") {
+        freqTag = ` [freq:7]`;
+      }
 
-      // Sobremesa — DEVE vir antes de qualquer outro replace que possa consumir o conteúdo
-      // Captura "Sobremesa 4x na semana" e os bullets que vêm DEPOIS
-      .replace(
-        /Sobremesa\s+(\d+)x\s*na\s*semana\s*/gi,
-        (_, n) => `14:00 - Sobremesa - Opção 1 [freq:${n}] `,
-      )
-      .replace(
-        /(?<!\d{2}:\d{2}\s*-\s*)Sobremesa\s*-\s*Opção\s*(\d+)/gi,
-        "14:00 - Sobremesa - Opção $1",
-      )
-      .replace(/(Bis)\s+Observa[çc][ãa]o:/gi, "$1 ###OBSERVACAO_SOBREMESA### ")
-
-      // Lanche — Opção 1 já vem com horário mas sem número
-      .replace(
-        /16:30\s*-\s*Lanche da tarde(?!\s*-\s*Opção)/gi,
-        "16:30 - Lanche da tarde - Opção 1",
-      )
-      .replace(
-        /(?<!\d{2}:\d{2}\s*-\s*)Lanche da tarde\s*-\s*Opção\s*(\d+)/gi,
-        "16:30 - Lanche da tarde - Opção $1",
-      )
-
-      // Jantar
-      .replace(
-        /19:30\s*-\s*Jantar(?!\s*-\s*Opção)/gi,
-        "19:30 - Jantar - Opção 1",
-      )
-      .replace(
-        /(?<!\d{2}:\d{2}\s*-\s*)Jantar\s*-\s*Opção\s*(\d+)/gi,
-        "19:30 - Jantar - Opção $1",
-      )
+      return `${horarioFinal} - ${config.nomeCanonico} - Opção ${opcaoFinal}${freqTag}`;
+    },
   );
+
+  return limpo.replace(/\s+/g, " ").trim();
 }
 
 export function extrairRefeicoesPorRegex(texto: string): RefeicaoEstruturada[] {
   texto = normalizarPlanoAlimentar(texto);
-  const refeicoes: RefeicaoEstruturada[] = [];
+  console.log("🟡 TEXTO NORMALIZADO:\n", texto);
   const regex =
     /(\d{2}:\d{2})\s*-\s*(Café da manhã|Almoço|Lanche da tarde|Jantar|Sobremesa|Complemento)\s*-\s*Opção\s*(\d+)([\s\S]*?)(?=\d{2}:\d{2}\s*-|$)/gi;
+
+  // dedup por tipo+opção — mantém a ÚLTIMA ocorrência (assumindo que
+  // se o texto repete um bloco, o mais recente reflete a versão final)
+  const porChave = new Map<string, RefeicaoEstruturada>();
 
   let match;
   while ((match = regex.exec(texto)) !== null) {
@@ -210,31 +359,25 @@ export function extrairRefeicoesPorRegex(texto: string): RefeicaoEstruturada[] {
     const opcaoNum = Number(match[3]);
     const blocoRaw = match[4];
 
-    // Extrai frequência semanal se existir
     const freqMatch = blocoRaw.match(/\[freq:(\d+)\]/);
     const frequencia_semanal = freqMatch ? Number(freqMatch[1]) : undefined;
 
     const bloco = limparConteudoPlano(blocoRaw.replace(/\[freq:\d+\]/g, ""));
-    console.log("TIPO:", tipo);
-    console.log("BLOCO RAW:", blocoRaw);
-    console.log("BLOCO LIMPO:", bloco);
     const observacoes = extrairObservacoes(blocoRaw);
-
     const itensExtraidos = extrairItens(bloco);
 
-    console.log("ITENS EXTRAIDOS:", tipo, itensExtraidos);
-    refeicoes.push({
+    const chave = `${tipo}_${opcaoNum}`;
+    porChave.set(chave, {
       horario,
       tipo,
       opcao: opcaoNum,
-      //itens: extrairItens(bloco),
       itens: itensExtraidos,
       observacoes: observacoes || undefined,
       frequencia_semanal,
     });
   }
 
-  return refeicoes;
+  return Array.from(porChave.values());
 }
 
 function normalizarTipo(
@@ -251,11 +394,7 @@ function normalizarTipo(
 }
 
 function limparConteudoPlano(texto: string): string {
-  return texto
-    .replace(/Priscila Ferrão[\s\S]*?Prescrito em:.*?\./g, "")
-    .replace(/Página\s+\d+\/\d+/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
+  return limparCabecalhoRodape(texto).replace(/\s+/g, " ").trim();
 }
 
 function extrairItens(bloco: string): ItemRefeicao[] {
@@ -264,13 +403,21 @@ function extrairItens(bloco: string): ItemRefeicao[] {
   bloco = bloco.replace(/###OBSERVACAO_SOBREMESA###[\s\S]*$/i, "");
 
   const blocoItens = bloco.split(/Observa[çc][õo]e?s?:/i)[0];
+  console.log(
+    "BLOCO ITENS (antes do split por •):",
+    JSON.stringify(blocoItens),
+  );
+
   const linhas = blocoItens.split("•");
+  console.log("QUANTIDADE DE LINHAS APÓS SPLIT POR •:", linhas.length);
+  console.log(
+    "LINHAS:",
+    linhas.map((l) => JSON.stringify(l.trim())),
+  );
 
   for (const linha of linhas) {
     const texto = linha.trim();
     if (!texto) continue;
-    // Se existir observação dentro do item,
-    // corta ela para não virar nome do alimento
     const textoLimpo = texto
       .replace(/###OBSERVACAO_SOBREMESA###[\s\S]*/i, "")
       .trim();
@@ -278,10 +425,7 @@ function extrairItens(bloco: string): ItemRefeicao[] {
     if (!textoLimpo) continue;
     if (/^-?\s*opção\s*\d+/i.test(textoLimpo)) continue;
 
-    // Separa alternativas pelo "ou" de forma segura
     let partes = textoLimpo.split(/\s+-\s+ou\s+-\s+/i);
-    // Se não encontrou o padrão correto,
-    // tenta variações de erro de digitação da nutri
     if (partes.length === 1) {
       partes = textoLimpo.split(
         /\s+-\s+ou-\s+|\s+-ou\s+-|\s+-ou-\s+|\s+ou-\s+|\s+ou\s+-|\s+-\s+ou\s+|\s+-ou\s+/i,
@@ -289,11 +433,13 @@ function extrairItens(bloco: string): ItemRefeicao[] {
     }
     partes = partes.map((p) => p.trim()).filter(Boolean);
 
+    console.log("LINHA:", JSON.stringify(textoLimpo), "→ PARTES:", partes);
+
     if (partes.length === 0) continue;
 
     if (partes.length === 1) {
-      // Item simples — sem alternativas
       const parsed = parseNomeQtd(partes[0]);
+      console.log("  PARSED (item simples):", parsed);
       if (!parsed || !parsed.nome) continue;
       itens.push({
         nome: parsed.nome,
@@ -301,38 +447,29 @@ function extrairItens(bloco: string): ItemRefeicao[] {
         observacao: parsed.observacao,
       });
     } else {
-      // Item com alternativas
-      // A observação pode estar na ÚLTIMA parte — extrai antes do parse
-      //const ultimaParte = partes[partes.length - 1];
       let observacaoGrupo = "";
-
       const OBS_PATTERNS = [
         /\s*com café sem açúcar ou com adoçante\.?/gi,
         /\s*retire bem o excesso de óleo\.?/gi,
         /\s*tempere e pese cru\.?/gi,
       ];
 
-      // Procura observação em qualquer parte (geralmente na última)
       const partesLimpas = partes.map((p) => {
         let limpa = p;
         for (const re of OBS_PATTERNS) {
           const m = limpa.match(re);
-          if (m && !observacaoGrupo) {
-            observacaoGrupo = m[0].trim();
-          }
+          if (m && !observacaoGrupo) observacaoGrupo = m[0].trim();
           limpa = limpa.replace(re, "").trim();
         }
         return limpa;
       });
 
-      // Parse de cada alternativa sem a observação
       const alternativas = partesLimpas
-        .map((p) => {
-          const parsed = parseNomeQtd(p);
-          if (!parsed || !parsed.nome) return null;
-          return { nome: parsed.nome, quantidade: parsed.quantidade };
-        })
-        .filter(Boolean) as { nome: string; quantidade: string }[];
+        .map((p) => parseNomeQtd(p))
+        .filter((p): p is NonNullable<typeof p> => !!p && !!p.nome)
+        .map((p) => ({ nome: p.nome, quantidade: p.quantidade }));
+
+      console.log("  ALTERNATIVAS parseadas:", alternativas);
 
       if (alternativas.length === 0) continue;
 
@@ -340,11 +477,12 @@ function extrairItens(bloco: string): ItemRefeicao[] {
         nome: alternativas[0].nome,
         quantidade: alternativas[0].quantidade,
         observacao: observacaoGrupo || undefined,
-        alternativas, // inclui todas, inclusive a primeira
+        alternativas,
       });
     }
   }
 
+  console.log("ITENS FINAIS DESTE BLOCO:", itens);
   return itens;
 }
 

@@ -1,5 +1,9 @@
 import { useState } from "react";
-import type { RefeicaoPlano, OpcaoRefeicao, ItemRefeicao } from "./AdminEditarPlano";
+import type {
+  RefeicaoPlano,
+  OpcaoRefeicao,
+  ItemRefeicao,
+} from "./AdminEditarPlano";
 import { supabase } from "../../lib/supabase";
 
 interface Props {
@@ -32,6 +36,7 @@ export default function AdminEditarRefeicao({
   onSalvo,
 }: Props) {
   const [horario, setHorario] = useState(refeicao.horario);
+  const semHorarioFixo = horario === "";
   const [observacoes, setObservacoes] = useState(refeicao.observacoes ?? "");
   const [frequenciaSemanal, setFrequenciaSemanal] = useState(
     refeicao.frequencia_semanal ?? 1,
@@ -280,12 +285,27 @@ export default function AdminEditarRefeicao({
 
           <div>
             <label className="text-xs text-gray-400">Horário</label>
-            <input
-              type="time"
-              value={horario}
-              onChange={(e) => setHorario(e.target.value)}
-              className="w-full border border-gray-200 rounded-xl px-3 py-2 mt-1"
-            />
+
+            <label className="flex items-center gap-2 mt-2 mb-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={semHorarioFixo}
+                onChange={(e) => setHorario(e.target.checked ? "" : "12:00")}
+                className="rounded"
+              />
+              <span className="text-sm text-gray-600">
+                Sem horário fixo — não mostrar horário para o paciente
+              </span>
+            </label>
+
+            {!semHorarioFixo && (
+              <input
+                type="time"
+                value={horario}
+                onChange={(e) => setHorario(e.target.value)}
+                className="w-full border border-gray-200 rounded-xl px-3 py-2 mt-1"
+              />
+            )}
           </div>
 
           {refeicao.tipo === "sobremesa" && (
@@ -298,9 +318,7 @@ export default function AdminEditarRefeicao({
                 min={1}
                 max={7}
                 value={frequenciaSemanal}
-                onChange={(e) =>
-                  setFrequenciaSemanal(Number(e.target.value))
-                }
+                onChange={(e) => setFrequenciaSemanal(Number(e.target.value))}
                 className="w-full border border-gray-200 rounded-xl px-3 py-2 mt-1"
               />
               <p className="text-xs text-gray-400 mt-1">
@@ -340,9 +358,7 @@ export default function AdminEditarRefeicao({
             <div className="flex items-center px-5 py-4 border-b border-gray-50">
               <button
                 onClick={() =>
-                  setOpcaoAberta(
-                    opcaoAberta === opcaoIdx ? null : opcaoIdx,
-                  )
+                  setOpcaoAberta(opcaoAberta === opcaoIdx ? null : opcaoIdx)
                 }
                 className="flex-1 flex items-center gap-2 text-left"
               >
@@ -350,7 +366,8 @@ export default function AdminEditarRefeicao({
                   Opção {opcao.numero}
                 </span>
                 <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">
-                  {opcao.itens.length} item{opcao.itens.length !== 1 ? "ns" : ""}
+                  {opcao.itens.length} item
+                  {opcao.itens.length !== 1 ? "ns" : ""}
                 </span>
                 <span className="text-gray-300 ml-auto">
                   {opcaoAberta === opcaoIdx ? "∨" : ">"}
@@ -385,6 +402,7 @@ export default function AdminEditarRefeicao({
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-bold text-gray-500">
                         Item {itemIdx + 1}
+                        {item.titulo ? ` · "${item.titulo}"` : ""}
                         {item.alternativas
                           ? ` · ${item.alternativas.length} alternativas`
                           : ""}
@@ -400,6 +418,24 @@ export default function AdminEditarRefeicao({
                     {item.alternativas ? (
                       /* Item com alternativas */
                       <div className="space-y-2">
+                        <div>
+                          <label className="text-xs text-gray-400">
+                            Título do grupo (opcional)
+                          </label>
+                          <input
+                            value={item.titulo ?? ""}
+                            onChange={(e) =>
+                              updateItem(
+                                opcaoIdx,
+                                itemIdx,
+                                "titulo",
+                                e.target.value,
+                              )
+                            }
+                            placeholder='Ex: "Suco", "Proteína", "Carboidrato"...'
+                            className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm mt-1"
+                          />
+                        </div>
                         <p className="text-xs text-blue-500 font-bold">
                           Alternativas — paciente escolhe uma:
                         </p>
@@ -463,7 +499,12 @@ export default function AdminEditarRefeicao({
                         <input
                           value={item.nome}
                           onChange={(e) =>
-                            updateItem(opcaoIdx, itemIdx, "nome", e.target.value)
+                            updateItem(
+                              opcaoIdx,
+                              itemIdx,
+                              "nome",
+                              e.target.value,
+                            )
                           }
                           placeholder="Nome do alimento"
                           className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm"
@@ -482,9 +523,7 @@ export default function AdminEditarRefeicao({
                           className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs"
                         />
                         <button
-                          onClick={() =>
-                            ativarAlternativas(opcaoIdx, itemIdx)
-                          }
+                          onClick={() => ativarAlternativas(opcaoIdx, itemIdx)}
                           className="text-xs text-blue-500 font-bold mt-1"
                         >
                           + adicionar alternativas para este item

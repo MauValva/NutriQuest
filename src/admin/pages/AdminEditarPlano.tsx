@@ -14,6 +14,7 @@ type TipoRefeicao =
 export interface ItemRefeicao {
   nome: string;
   quantidade: string;
+  titulo?: string;
   alternativas?: { nome: string; quantidade: string }[];
   observacao?: string;
 }
@@ -199,7 +200,7 @@ export default function AdminEditarPlano({ paciente, onVoltar }: Props) {
                           {tipoInfo.label}
                         </p>
                         <p className="text-xs text-gray-400 mt-0.5">
-                          {refeicao.horario}
+                          {refeicao.horario || "Sem horário fixo"}
                           {" · "}
                           {refeicao.opcoes.length} opção
                           {refeicao.opcoes.length !== 1 ? "ões" : ""}

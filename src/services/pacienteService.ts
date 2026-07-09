@@ -1,4 +1,5 @@
 import { supabase, type Paciente, type MissaoDB } from "../lib/supabase";
+import { calcularTipoConclusao, calcularPontos } from "./pontuacaoService";
 
 // ── Login do paciente ─────────────────────────────────
 export async function loginPaciente(
@@ -92,13 +93,19 @@ export async function buscarPlanoAlimentar(pacienteId: string) {
   return data;
 }
 
+// ── Confirma uma opção do plano (com ou sem observação) ──
 export async function registrarRefeicaoConfirmada(
   pacienteId: string,
   tipo: string,
   opcaoNumero: number,
+  pontosBase: number,
+  observacao: string = "",
 ): Promise<boolean> {
   const hoje = new Date().toISOString().split("T")[0];
   const horario = new Date().toTimeString().slice(0, 5);
+
+  const tipoConclusao = calcularTipoConclusao(true, observacao);
+  const pontosGanhos = calcularPontos(pontosBase, tipoConclusao);
 
   const { error } = await supabase.from("refeicoes_registradas").upsert(
     {
@@ -107,12 +114,44 @@ export async function registrarRefeicaoConfirmada(
       data: hoje,
       horario,
       alimentos: { opcao: opcaoNumero },
+      tipo_conclusao: tipoConclusao,
+      observacao_paciente: observacao.trim() || null,
+      pontos_ganhos: pontosGanhos,
       total_calorias: 0,
       macros: {},
     },
+    { onConflict: "paciente_id,tipo,data" },
+  );
+
+  return !error;
+}
+
+// ── Registra que o paciente NÃO seguiu nenhuma opção do plano ──
+export async function registrarRefeicaoExtra(
+  pacienteId: string,
+  tipo: string,
+  pontosBase: number,
+  textoLivre: string,
+): Promise<boolean> {
+  const hoje = new Date().toISOString().split("T")[0];
+  const horario = new Date().toTimeString().slice(0, 5);
+
+  const pontosGanhos = calcularPontos(pontosBase, "extra");
+
+  const { error } = await supabase.from("refeicoes_registradas").upsert(
     {
-      onConflict: "paciente_id,tipo,data",
+      paciente_id: pacienteId,
+      tipo,
+      data: hoje,
+      horario,
+      alimentos: null,
+      tipo_conclusao: "extra",
+      observacao_paciente: textoLivre.trim(),
+      pontos_ganhos: pontosGanhos,
+      total_calorias: 0,
+      macros: {},
     },
+    { onConflict: "paciente_id,tipo,data" },
   );
 
   return !error;

@@ -64,7 +64,8 @@ export interface OpcaoRefeicao {
 export interface ItemRefeicao {
   nome: string;
   quantidade: string;
-  alternativas?: string[];
+  titulo?: string;
+  observacao?: string;
 }
 
 export interface PacienteTag {

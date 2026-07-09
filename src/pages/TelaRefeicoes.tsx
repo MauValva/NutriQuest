@@ -3,6 +3,7 @@ import { useApp } from "../contexts/useApp";
 import {
   buscarPlanoAlimentar,
   registrarRefeicaoConfirmada,
+  registrarRefeicaoExtra,
 } from "../services/pacienteService";
 
 import { supabase } from "../lib/supabase";
@@ -23,6 +24,7 @@ interface Alternativa {
 interface ItemRefeicao {
   nome: string;
   quantidade: string;
+  titulo?: string;
   alternativas?: Alternativa[];
   selecionado?: number;
   observacao?: string;
@@ -41,6 +43,8 @@ interface RefeicaoPlano {
   horario?: string;
   opcoes: OpcaoRefeicao[];
   observacoes?: string;
+  pontosBase: number;
+  extraConfirmada?: boolean;
 }
 
 const TODAS_ABAS: { tipo: TipoRefeicao; icone: string; label: string }[] = [
@@ -168,6 +172,12 @@ export default function TelaRefeicoes() {
   const [dicaAberta, setDicaAberta] = useState<string | null>(null);
   const [sobremesaDisponivel, setSobremesaDisponivel] = useState(true);
   const [sobremesaInfo, setSobremesaInfo] = useState({ usadas: 0, limite: 0 });
+  const [observacaoPorOpcao, setObservacaoPorOpcao] = useState<
+    Record<number, string>
+  >({});
+  const [modalExtraAberto, setModalExtraAberto] = useState(false);
+  const [textoExtra, setTextoExtra] = useState("");
+  const [enviandoExtra, setEnviandoExtra] = useState(false);
 
   function gerarAbas(plano: RefeicaoPlano[]) {
     return TODAS_ABAS.filter((aba) =>
@@ -200,11 +210,16 @@ export default function TelaRefeicoes() {
               return {
                 tipo: r.tipo as TipoRefeicao,
                 horario: r.horario as string,
+                pontosBase: (r.pontos_base as number) ?? 10,
+                extraConfirmada: false,
                 opcoes: opcoes.map((op, idx) => ({
                   numero: op.numero ?? idx + 1,
                   itens: (op.itens ?? []).map((item) => ({
                     nome: item.nome,
                     quantidade: item.quantidade,
+                    titulo: (item as Record<string, unknown>).titulo as
+                      | string
+                      | undefined,
                     observacao: (item as Record<string, unknown>).observacao as
                       | string
                       | undefined,
@@ -249,6 +264,10 @@ export default function TelaRefeicoes() {
   }, [paciente.id]);
 
   const refeicaoAtiva = plano.find((r) => r.tipo === abaAtiva);
+  const algumaOpcaoConcluida =
+    refeicaoAtiva?.opcoes.some((op) => op.concluida) ?? false;
+  const refeicaoJaResolvida =
+    algumaOpcaoConcluida || (refeicaoAtiva?.extraConfirmada ?? false);
 
   function toggleOpcao(index: number) {
     setOpcaoAberta((prev) => (prev === index ? null : index));
@@ -280,6 +299,8 @@ export default function TelaRefeicoes() {
   }
 
   async function concluirOpcao(opcaoIdx: number) {
+    const observacao = observacaoPorOpcao[opcaoIdx] ?? "";
+
     setPlano((prev) =>
       prev.map((r) => {
         if (r.tipo !== abaAtiva) return r;
@@ -296,8 +317,13 @@ export default function TelaRefeicoes() {
     );
     setOpcaoAberta(null);
 
-    // Salva no Supabase em background
-    await registrarRefeicaoConfirmada(paciente.id, abaAtiva, opcaoIdx + 1);
+    await registrarRefeicaoConfirmada(
+      paciente.id,
+      abaAtiva,
+      opcaoIdx + 1,
+      refeicaoAtiva?.pontosBase ?? 10,
+      observacao,
+    );
 
     if (abaAtiva === "sobremesa") {
       await registrarUsoSobremesa(paciente.id);
@@ -305,6 +331,35 @@ export default function TelaRefeicoes() {
       setSobremesaDisponivel(info.disponivel);
       setSobremesaInfo({ usadas: info.usadas, limite: info.limite });
     }
+  }
+
+  async function enviarRefeicaoExtra() {
+    if (!textoExtra.trim() || !refeicaoAtiva) return;
+    setEnviandoExtra(true);
+
+    const sucesso = await registrarRefeicaoExtra(
+      paciente.id,
+      abaAtiva,
+      refeicaoAtiva.pontosBase,
+      textoExtra,
+    );
+
+    if (sucesso) {
+      setPlano((prev) =>
+        prev.map((r) => {
+          if (r.tipo !== abaAtiva) return r;
+          return {
+            ...r,
+            extraConfirmada: true,
+            opcoes: r.opcoes.map((op) => ({ ...op, bloqueada: true })),
+          };
+        }),
+      );
+    }
+
+    setEnviandoExtra(false);
+    setModalExtraAberto(false);
+    setTextoExtra("");
   }
 
   function opcaoProntoParaConcluir(opcao: OpcaoRefeicao): boolean {
@@ -395,11 +450,11 @@ export default function TelaRefeicoes() {
               </div>
             </div>
             <p className="font-bold text-lg">
-              {abaAtiva === "sobremesa"
-                ? "Sobremesa"
-                : `${refeicaoAtiva.horario} — ${
+              {refeicaoAtiva.horario
+                ? `${refeicaoAtiva.horario} — ${
                     TODAS_ABAS.find((a) => a.tipo === abaAtiva)?.label
-                  }`}
+                  }`
+                : TODAS_ABAS.find((a) => a.tipo === abaAtiva)?.label}
             </p>
           </div>
         )}
@@ -527,9 +582,11 @@ export default function TelaRefeicoes() {
                               {comOpcao.map((item, itemIdx) => {
                                 // Índice real no array original para manter seleção correta
                                 const idxReal = opcao.itens.indexOf(item);
-                                const cat = detectarCategoria(
-                                  item.alternativas![0].nome,
-                                );
+                                const cat = item.titulo
+                                  ? { titulo: item.titulo, icone: "✨" }
+                                  : detectarCategoria(
+                                      item.alternativas![0].nome,
+                                    );
 
                                 return (
                                   <div key={itemIdx}>
@@ -704,6 +761,26 @@ export default function TelaRefeicoes() {
                       </>
                     )}
 
+                    {!opcao.concluida && (
+                      <div className="mb-3">
+                        <label className="text-xs text-gray-400">
+                          Não fez alguma das opções? Conte aqui (opcional)
+                        </label>
+                        <textarea
+                          value={observacaoPorOpcao[opcaoIdx] ?? ""}
+                          onChange={(e) =>
+                            setObservacaoPorOpcao((prev) => ({
+                              ...prev,
+                              [opcaoIdx]: e.target.value,
+                            }))
+                          }
+                          rows={2}
+                          placeholder="Ex: troquei o pão por tapioca, comi menos arroz..."
+                          className="w-full border border-gray-200 rounded-lg px-3 py-2 mt-1 text-sm resize-none"
+                        />
+                      </div>
+                    )}
+
                     {/* Botão Fiz essa! */}
                     <button
                       onClick={() =>
@@ -731,6 +808,61 @@ export default function TelaRefeicoes() {
               </div>
             );
           })}
+          {/* Nenhuma das opções */}
+          {refeicaoAtiva && (
+            <button
+              onClick={() => !refeicaoJaResolvida && setModalExtraAberto(true)}
+              disabled={refeicaoJaResolvida}
+              className={`w-full mt-3 border-2 border-dashed font-medium py-3 rounded-xl text-sm transition-colors
+      ${
+        refeicaoJaResolvida
+          ? "border-gray-100 text-gray-300 cursor-not-allowed"
+          : "border-gray-200 text-gray-400 hover:border-gray-300 hover:text-gray-500"
+      }`}
+            >
+              {refeicaoAtiva.extraConfirmada
+                ? "✓ Você registrou o que comeu"
+                : "Não fiz nenhuma dessas — o que você comeu?"}
+            </button>
+          )}
+          {modalExtraAberto && (
+            <div
+              className="fixed inset-0 bg-black/40 z-50 flex items-end"
+              onClick={() => setModalExtraAberto(false)}
+            >
+              <div
+                className="bg-white w-full max-w-107.5 mx-auto rounded-t-3xl p-6"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <h3 className="font-bold text-gray-800 mb-3">
+                  O que você comeu nessa refeição?
+                </h3>
+                <textarea
+                  value={textoExtra}
+                  onChange={(e) => setTextoExtra(e.target.value)}
+                  rows={4}
+                  autoFocus
+                  placeholder="Conte o que você comeu, mesmo que não tenha sido do plano..."
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm resize-none"
+                />
+                <div className="flex gap-2 mt-4">
+                  <button
+                    onClick={() => setModalExtraAberto(false)}
+                    className="flex-1 bg-gray-100 text-gray-600 font-bold py-3 rounded-xl"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={enviarRefeicaoExtra}
+                    disabled={!textoExtra.trim() || enviandoExtra}
+                    className="flex-1 bg-green-500 text-white font-bold py-3 rounded-xl disabled:opacity-50"
+                  >
+                    {enviandoExtra ? "Enviando..." : "Enviar"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -742,6 +874,7 @@ const PLANO_EXEMPLO: RefeicaoPlano[] = [
   {
     tipo: "cafe",
     horario: "06:30",
+    pontosBase: 10,
     opcoes: [
       {
         numero: 1,
@@ -773,6 +906,7 @@ const PLANO_EXEMPLO: RefeicaoPlano[] = [
   {
     tipo: "almoco",
     horario: "12:30",
+    pontosBase: 10,
     opcoes: [
       {
         numero: 1,
@@ -794,6 +928,7 @@ const PLANO_EXEMPLO: RefeicaoPlano[] = [
   {
     tipo: "lanche",
     horario: "16:30",
+    pontosBase: 10,
     opcoes: [
       {
         numero: 1,
@@ -823,6 +958,7 @@ const PLANO_EXEMPLO: RefeicaoPlano[] = [
   {
     tipo: "jantar",
     horario: "19:30",
+    pontosBase: 10,
     opcoes: [
       {
         numero: 1,
