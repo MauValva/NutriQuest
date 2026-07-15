@@ -1,6 +1,29 @@
 import { supabase, type Paciente, type MissaoDB } from "../lib/supabase";
 import { calcularTipoConclusao, calcularPontos } from "./pontuacaoService";
 
+export function dataHojeStr(): string {
+  return new Date().toISOString().split("T")[0];
+}
+
+export function dataOntemStr(): string {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return d.toISOString().split("T")[0];
+}
+
+export function podeEditarData(data: string): boolean {
+  return data === dataHojeStr() || data === dataOntemStr();
+}
+
+export interface RegistroRefeicaoDia {
+  tipo: string;
+  tipoConclusao: "completa" | "parcial" | "extra";
+  opcaoNumero?: number;
+  observacaoPaciente?: string;
+  pontosGanhos: number;
+  horario: string;
+}
+
 // ── Login do paciente ─────────────────────────────────
 export async function loginPaciente(
   email: string,
@@ -100,10 +123,11 @@ export async function registrarRefeicaoConfirmada(
   opcaoNumero: number,
   pontosBase: number,
   observacao: string = "",
+  data: string = dataHojeStr(),
 ): Promise<boolean> {
-  const hoje = new Date().toISOString().split("T")[0];
-  const horario = new Date().toTimeString().slice(0, 5);
+  if (!podeEditarData(data)) return false;
 
+  const horario = new Date().toTimeString().slice(0, 5);
   const tipoConclusao = calcularTipoConclusao(true, observacao);
   const pontosGanhos = calcularPontos(pontosBase, tipoConclusao);
 
@@ -111,7 +135,7 @@ export async function registrarRefeicaoConfirmada(
     {
       paciente_id: pacienteId,
       tipo,
-      data: hoje,
+      data,
       horario,
       alimentos: { opcao: opcaoNumero },
       tipo_conclusao: tipoConclusao,
@@ -123,6 +147,7 @@ export async function registrarRefeicaoConfirmada(
     { onConflict: "paciente_id,tipo,data" },
   );
 
+  if (error) console.error("Erro registrarRefeicaoConfirmada:", error);
   return !error;
 }
 
@@ -132,17 +157,18 @@ export async function registrarRefeicaoExtra(
   tipo: string,
   pontosBase: number,
   textoLivre: string,
+  data: string = dataHojeStr(),
 ): Promise<boolean> {
-  const hoje = new Date().toISOString().split("T")[0];
-  const horario = new Date().toTimeString().slice(0, 5);
+  if (!podeEditarData(data)) return false;
 
+  const horario = new Date().toTimeString().slice(0, 5);
   const pontosGanhos = calcularPontos(pontosBase, "extra");
 
   const { error } = await supabase.from("refeicoes_registradas").upsert(
     {
       paciente_id: pacienteId,
       tipo,
-      data: hoje,
+      data,
       horario,
       alimentos: null,
       tipo_conclusao: "extra",
@@ -154,8 +180,60 @@ export async function registrarRefeicaoExtra(
     { onConflict: "paciente_id,tipo,data" },
   );
 
+  if (error) console.error("Erro registrarRefeicaoExtra:", error);
   return !error;
 }
+
+// ── Desfaz uma confirmação (só permitido em hoje/ontem) ──
+export async function desfazerRefeicao(
+  pacienteId: string,
+  tipo: string,
+  data: string,
+): Promise<boolean> {
+  if (!podeEditarData(data)) return false;
+
+  const { error } = await supabase
+    .from("refeicoes_registradas")
+    .delete()
+    .eq("paciente_id", pacienteId)
+    .eq("tipo", tipo)
+    .eq("data", data);
+
+  if (error) console.error("Erro desfazerRefeicao:", error);
+  return !error;
+}
+
+// ── Busca o que já foi registrado numa data específica ──
+export async function buscarRegistrosPorData(
+  pacienteId: string,
+  data: string,
+): Promise<Record<string, RegistroRefeicaoDia>> {
+  const { data: registros, error } = await supabase
+    .from("refeicoes_registradas")
+    .select(
+      "tipo, horario, alimentos, tipo_conclusao, observacao_paciente, pontos_ganhos",
+    )
+    .eq("paciente_id", pacienteId)
+    .eq("data", data);
+
+  if (error || !registros) return {};
+
+  return registros.reduce(
+    (acc, r) => {
+      acc[r.tipo] = {
+        tipo: r.tipo,
+        tipoConclusao: r.tipo_conclusao,
+        opcaoNumero: (r.alimentos as { opcao?: number } | null)?.opcao,
+        observacaoPaciente: r.observacao_paciente ?? undefined,
+        pontosGanhos: r.pontos_ganhos ?? 0,
+        horario: r.horario,
+      };
+      return acc;
+    },
+    {} as Record<string, RegistroRefeicaoDia>,
+  );
+}
+
 // Retorna a semana atual no formato "2026-W22"
 function semanaAtual(): string {
   const now = new Date();

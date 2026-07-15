@@ -2,6 +2,11 @@ import { useEffect, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import type { Paciente } from "../../lib/supabase";
 import AdminEditarRefeicao from "./AdminEditarRefeicao";
+import {
+  extrairTextoPDF,
+  extrairRefeicoesPorRegex,
+} from "../../services/pdfService";
+import { salvarPlanoAlimentar } from "../../services/nutricionistaService";
 
 type TipoRefeicao =
   | "cafe"
@@ -56,6 +61,11 @@ export default function AdminEditarPlano({ paciente, onVoltar }: Props) {
     useState<RefeicaoPlano | null>(null);
   const [adicionandoTipo, setAdicionandoTipo] = useState(false);
   const [excluindo, setExcluindo] = useState<string | null>(null);
+  const [processandoUpload, setProcessandoUpload] = useState(false);
+  const [erroUpload, setErroUpload] = useState("");
+  const [arquivoParaConfirmar, setArquivoParaConfirmar] = useState<File | null>(
+    null,
+  );
 
   useEffect(() => {
     supabase
@@ -73,6 +83,59 @@ export default function AdminEditarPlano({ paciente, onVoltar }: Props) {
         setCarregando(false);
       });
   }, [paciente.id]);
+
+  async function recarregarRefeicoes() {
+    const { data, error } = await supabase
+      .from("refeicoes_plano")
+      .select("*")
+      .eq("paciente_id", paciente.id)
+      .order("horario");
+
+    if (error) {
+      console.error(error);
+      return;
+    }
+    setRefeicoes(data ?? []);
+  }
+
+  async function substituirPlanoPorPDF(arquivo: File) {
+    setProcessandoUpload(true);
+    setErroUpload("");
+
+    try {
+      const texto = await extrairTextoPDF(arquivo);
+      const refeicoesExtraidas = extrairRefeicoesPorRegex(texto);
+
+      if (refeicoesExtraidas.length === 0) {
+        setErroUpload(
+          "Não foi possível identificar refeições no PDF. Verifique o arquivo.",
+        );
+        setProcessandoUpload(false);
+        return;
+      }
+
+      const sucesso = await salvarPlanoAlimentar(
+        paciente.id,
+        refeicoesExtraidas,
+      );
+
+      if (!sucesso) {
+        setErroUpload("Erro ao salvar o novo plano. Tente novamente.");
+        setProcessandoUpload(false);
+        return;
+      }
+
+      await recarregarRefeicoes();
+      setArquivoParaConfirmar(null);
+    } catch (e) {
+      console.error(e);
+      setErroUpload(
+        "Erro ao processar o PDF. Verifique o arquivo e tente novamente.",
+      );
+    } finally {
+      setProcessandoUpload(false);
+    }
+  }
 
   async function adicionarRefeicao(tipo: TipoRefeicao) {
     const novaRefeicao = {
@@ -158,6 +221,49 @@ export default function AdminEditarPlano({ paciente, onVoltar }: Props) {
       </div>
 
       <div className="max-w-2xl mx-auto px-4 py-6 space-y-3">
+        {/* Upload de novo plano via PDF */}
+        <div className="bg-white rounded-2xl p-5 shadow-sm">
+          <h2 className="font-bold text-gray-700 mb-1">
+            📄 Substituir plano via PDF
+          </h2>
+          <p className="text-xs text-gray-400 mb-4">
+            Enviar um novo PDF substitui completamente o plano atual deste
+            paciente.
+          </p>
+
+          <label
+            className={`block border-2 border-dashed rounded-2xl p-5 text-center cursor-pointer transition-all
+              ${
+                processandoUpload
+                  ? "border-gray-200 opacity-50 cursor-not-allowed"
+                  : "border-gray-200 hover:border-green-300"
+              }`}
+          >
+            <input
+              type="file"
+              accept=".pdf"
+              disabled={processandoUpload}
+              className="hidden"
+              onChange={(e) => {
+                const arquivo = e.target.files?.[0];
+                if (arquivo) setArquivoParaConfirmar(arquivo);
+                e.target.value = ""; // permite selecionar o mesmo arquivo de novo depois
+              }}
+            />
+            <p className="text-2xl mb-2">🥗</p>
+            <p className="font-medium text-sm text-gray-700">
+              Novo Plano Alimentar (PDF)
+            </p>
+            <p className="text-xs text-gray-400 mt-1">Clique para selecionar</p>
+          </label>
+
+          {erroUpload && (
+            <div className="mt-3 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+              <p className="text-red-600 text-sm text-center">{erroUpload}</p>
+            </div>
+          )}
+        </div>
+
         {carregando ? (
           <div className="text-center py-16">
             <p className="text-4xl mb-3 animate-bounce">🥗</p>
@@ -242,7 +348,50 @@ export default function AdminEditarPlano({ paciente, onVoltar }: Props) {
           </>
         )}
       </div>
+      {/* Modal de confirmação de substituição */}
+      {arquivoParaConfirmar && (
+        <div
+          className="fixed inset-0 bg-black/40 flex items-end z-50"
+          onClick={() => !processandoUpload && setArquivoParaConfirmar(null)}
+        >
+          <div
+            className="bg-white w-full rounded-t-3xl p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="font-bold text-gray-800 mb-2">
+              Substituir plano alimentar?
+            </h2>
+            <p className="text-sm text-gray-500 mb-1">
+              Arquivo:{" "}
+              <span className="font-medium">{arquivoParaConfirmar.name}</span>
+            </p>
+            <p className="text-sm text-red-500 mb-5">
+              Isso vai apagar todas as refeições atuais de {paciente.nome} e
+              substituir pelo conteúdo deste PDF. Essa ação não pode ser
+              desfeita.
+            </p>
 
+            <div className="space-y-2">
+              <button
+                onClick={() => substituirPlanoPorPDF(arquivoParaConfirmar)}
+                disabled={processandoUpload}
+                className="w-full bg-green-500 text-white font-bold py-3 rounded-xl"
+              >
+                {processandoUpload
+                  ? "Processando..."
+                  : "Confirmar substituição"}
+              </button>
+              <button
+                onClick={() => setArquivoParaConfirmar(null)}
+                disabled={processandoUpload}
+                className="w-full bg-gray-100 text-gray-600 font-bold py-3 rounded-xl"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Modal escolher tipo */}
       {adicionandoTipo && (
         <div

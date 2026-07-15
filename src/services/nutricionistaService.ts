@@ -214,3 +214,67 @@ export async function atualizarPaciente(
 
   return data as Paciente;
 }
+
+export interface HistoricoItemRefeicao {
+  tipo: string;
+  label: string;
+  horarioPlanejado: string;
+  feita: boolean;
+  tipoConclusao?: "completa" | "parcial" | "extra";
+  opcaoNumero?: number;
+  observacaoPaciente?: string;
+  pontosGanhos?: number;
+  horarioConfirmado?: string;
+}
+
+const LABELS_REFEICAO: Record<string, string> = {
+  cafe: "Café da manhã",
+  almoco: "Almoço",
+  lanche: "Lanche",
+  jantar: "Jantar",
+  sobremesa: "Sobremesa",
+  complemento: "Complemento",
+};
+
+export async function buscarHistoricoPacienteData(
+  pacienteId: string,
+  data: string,
+): Promise<HistoricoItemRefeicao[]> {
+  const [
+    { data: plano, error: erroPlano },
+    { data: registros, error: erroReg },
+  ] = await Promise.all([
+    supabase
+      .from("refeicoes_plano")
+      .select("*")
+      .eq("paciente_id", pacienteId)
+      .order("horario"),
+    supabase
+      .from("refeicoes_registradas")
+      .select("*")
+      .eq("paciente_id", pacienteId)
+      .eq("data", data),
+  ]);
+
+  if (erroPlano || erroReg) {
+    console.error("Erro ao buscar histórico:", erroPlano ?? erroReg);
+    return [];
+  }
+
+  const registrosPorTipo = new Map((registros ?? []).map((r) => [r.tipo, r]));
+
+  return (plano ?? []).map((p) => {
+    const registro = registrosPorTipo.get(p.tipo);
+    return {
+      tipo: p.tipo,
+      label: LABELS_REFEICAO[p.tipo] ?? p.tipo,
+      horarioPlanejado: p.horario,
+      feita: !!registro,
+      tipoConclusao: registro?.tipo_conclusao,
+      opcaoNumero: (registro?.alimentos as { opcao?: number } | null)?.opcao,
+      observacaoPaciente: registro?.observacao_paciente ?? undefined,
+      pontosGanhos: registro?.pontos_ganhos,
+      horarioConfirmado: registro?.horario,
+    };
+  });
+}

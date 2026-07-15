@@ -4,6 +4,11 @@ import {
   buscarPlanoAlimentar,
   registrarRefeicaoConfirmada,
   registrarRefeicaoExtra,
+  buscarRegistrosPorData,
+  desfazerRefeicao,
+  dataHojeStr,
+  dataOntemStr,
+  type RegistroRefeicaoDia,
 } from "../services/pacienteService";
 
 import { supabase } from "../lib/supabase";
@@ -178,6 +183,13 @@ export default function TelaRefeicoes() {
   const [modalExtraAberto, setModalExtraAberto] = useState(false);
   const [textoExtra, setTextoExtra] = useState("");
   const [enviandoExtra, setEnviandoExtra] = useState(false);
+  const [diaSelecionado, setDiaSelecionado] = useState<"hoje" | "ontem">(
+    "hoje",
+  );
+  const [registrosPorDia, setRegistrosPorDia] = useState<
+    Record<string, Record<string, RegistroRefeicaoDia>>
+  >({});
+  const [desfazendo, setDesfazendo] = useState(false);
 
   function gerarAbas(plano: RefeicaoPlano[]) {
     return TODAS_ABAS.filter((aba) =>
@@ -263,11 +275,36 @@ export default function TelaRefeicoes() {
     carregar();
   }, [paciente.id]);
 
+  useEffect(() => {
+    async function carregarRegistros() {
+      const hoje = dataHojeStr();
+      const ontem = dataOntemStr();
+      const [regHoje, regOntem] = await Promise.all([
+        buscarRegistrosPorData(paciente.id, hoje),
+        buscarRegistrosPorData(paciente.id, ontem),
+      ]);
+      setRegistrosPorDia({ [hoje]: regHoje, [ontem]: regOntem });
+    }
+    carregarRegistros();
+  }, [paciente.id]);
+
   const refeicaoAtiva = plano.find((r) => r.tipo === abaAtiva);
-  const algumaOpcaoConcluida =
-    refeicaoAtiva?.opcoes.some((op) => op.concluida) ?? false;
-  const refeicaoJaResolvida =
-    algumaOpcaoConcluida || (refeicaoAtiva?.extraConfirmada ?? false);
+  const dataSelecionadaStr =
+    diaSelecionado === "hoje" ? dataHojeStr() : dataOntemStr();
+  const registroDoDia = registrosPorDia[dataSelecionadaStr]?.[abaAtiva];
+  const refeicaoJaResolvida = !!registroDoDia;
+
+  function statusDaOpcao(numero: number): "confirmada" | "bloqueada" | "livre" {
+    if (!registroDoDia) return "livre";
+    if (registroDoDia.tipoConclusao === "extra") return "bloqueada";
+    return registroDoDia.opcaoNumero === numero ? "confirmada" : "bloqueada";
+  }
+
+  function selecionarDia(dia: "hoje" | "ontem") {
+    setDiaSelecionado(dia);
+    setOpcaoAberta(null);
+    setObservacaoPorOpcao({});
+  }
 
   function toggleOpcao(index: number) {
     setOpcaoAberta((prev) => (prev === index ? null : index));
@@ -299,33 +336,46 @@ export default function TelaRefeicoes() {
   }
 
   async function concluirOpcao(opcaoIdx: number) {
+    if (!refeicaoAtiva) return;
+    const opcao = refeicaoAtiva.opcoes[opcaoIdx];
     const observacao = observacaoPorOpcao[opcaoIdx] ?? "";
 
-    setPlano((prev) =>
-      prev.map((r) => {
-        if (r.tipo !== abaAtiva) return r;
-        return {
-          ...r,
-          opcoes: r.opcoes.map((op, oi) => ({
-            ...op,
-            concluida: oi === opcaoIdx ? true : op.concluida,
-            bloqueada:
-              oi !== opcaoIdx && !op.concluida ? true : (op.bloqueada ?? false),
-          })),
-        };
-      }),
-    );
-    setOpcaoAberta(null);
-
-    await registrarRefeicaoConfirmada(
+    const sucesso = await registrarRefeicaoConfirmada(
       paciente.id,
       abaAtiva,
-      opcaoIdx + 1,
-      refeicaoAtiva?.pontosBase ?? 10,
+      opcao.numero,
+      refeicaoAtiva.pontosBase,
       observacao,
+      dataSelecionadaStr,
     );
 
-    if (abaAtiva === "sobremesa") {
+    if (sucesso) {
+      const tipoConclusao = observacao.trim() ? "parcial" : "completa";
+      const pontosGanhos = Math.round(
+        refeicaoAtiva.pontosBase * (tipoConclusao === "completa" ? 1 : 0.5),
+      );
+
+      setRegistrosPorDia((prev) => ({
+        ...prev,
+        [dataSelecionadaStr]: {
+          ...prev[dataSelecionadaStr],
+          [abaAtiva]: {
+            tipo: abaAtiva,
+            tipoConclusao,
+            opcaoNumero: opcao.numero,
+            observacaoPaciente: observacao.trim() || undefined,
+            pontosGanhos,
+            horario: new Date().toTimeString().slice(0, 5),
+          },
+        },
+      }));
+    }
+
+    setOpcaoAberta(null);
+
+    // Contador semanal de sobremesa só é atualizado ao confirmar HOJE —
+    // editar "ontem" retroativamente não mexe no contador da semana atual.
+    if (abaAtiva === "sobremesa" && diaSelecionado === "hoje") {
       await registrarUsoSobremesa(paciente.id);
       const info = await verificarSobremesaDisponivel(paciente.id);
       setSobremesaDisponivel(info.disponivel);
@@ -342,24 +392,51 @@ export default function TelaRefeicoes() {
       abaAtiva,
       refeicaoAtiva.pontosBase,
       textoExtra,
+      dataSelecionadaStr,
     );
 
     if (sucesso) {
-      setPlano((prev) =>
-        prev.map((r) => {
-          if (r.tipo !== abaAtiva) return r;
-          return {
-            ...r,
-            extraConfirmada: true,
-            opcoes: r.opcoes.map((op) => ({ ...op, bloqueada: true })),
-          };
-        }),
-      );
+      setRegistrosPorDia((prev) => ({
+        ...prev,
+        [dataSelecionadaStr]: {
+          ...prev[dataSelecionadaStr],
+          [abaAtiva]: {
+            tipo: abaAtiva,
+            tipoConclusao: "extra",
+            observacaoPaciente: textoExtra.trim(),
+            pontosGanhos: Math.round(refeicaoAtiva.pontosBase * 0.2),
+            horario: new Date().toTimeString().slice(0, 5),
+          },
+        },
+      }));
     }
 
     setEnviandoExtra(false);
     setModalExtraAberto(false);
     setTextoExtra("");
+  }
+
+  async function desfazerConfirmacao() {
+    setDesfazendo(true);
+    const sucesso = await desfazerRefeicao(
+      paciente.id,
+      abaAtiva,
+      dataSelecionadaStr,
+    );
+
+    if (sucesso) {
+      setRegistrosPorDia((prev) => {
+        const copia = { ...prev };
+        if (copia[dataSelecionadaStr]) {
+          const restoDoTipo = { ...copia[dataSelecionadaStr] };
+          delete restoDoTipo[abaAtiva];
+          copia[dataSelecionadaStr] = restoDoTipo;
+        }
+        return copia;
+      });
+    }
+
+    setDesfazendo(false);
   }
 
   function opcaoProntoParaConcluir(opcao: OpcaoRefeicao): boolean {
@@ -384,6 +461,28 @@ export default function TelaRefeicoes() {
     <div className="min-h-screen bg-gray-50 pb-24">
       {/* Header */}
       <div className="bg-white shadow-sm px-5 pt-12 pb-4">
+        <div className="flex items-center justify-center gap-2 mt-3">
+          <button
+            onClick={() => selecionarDia("ontem")}
+            className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${
+              diaSelecionado === "ontem"
+                ? "bg-green-500 text-white"
+                : "bg-gray-100 text-gray-500"
+            }`}
+          >
+            Ontem
+          </button>
+          <button
+            onClick={() => selecionarDia("hoje")}
+            className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${
+              diaSelecionado === "hoje"
+                ? "bg-green-500 text-white"
+                : "bg-gray-100 text-gray-500"
+            }`}
+          >
+            Hoje
+          </button>
+        </div>
         <h1 className="text-xl font-bold text-gray-800 mb-4">Refeições 🍽️</h1>
 
         {/* Abas — todas visíveis sem scroll */}
@@ -458,7 +557,36 @@ export default function TelaRefeicoes() {
             </p>
           </div>
         )}
-
+        {refeicaoJaResolvida && registroDoDia && (
+          <div className="bg-green-50 border border-green-200 rounded-2xl p-4 mb-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-bold text-green-700">
+                  {registroDoDia.tipoConclusao === "extra"
+                    ? "Você registrou o que comeu"
+                    : registroDoDia.tipoConclusao === "parcial"
+                      ? `Opção ${registroDoDia.opcaoNumero} confirmada (parcial)`
+                      : `Opção ${registroDoDia.opcaoNumero} confirmada`}
+                </p>
+                {registroDoDia.observacaoPaciente && (
+                  <p className="text-xs text-green-600 mt-1">
+                    "{registroDoDia.observacaoPaciente}"
+                  </p>
+                )}
+                <p className="text-xs text-green-500 mt-1">
+                  +{registroDoDia.pontosGanhos} pontos
+                </p>
+              </div>
+              <button
+                onClick={desfazerConfirmacao}
+                disabled={desfazendo}
+                className="text-xs font-bold text-red-500 hover:text-red-600 shrink-0"
+              >
+                {desfazendo ? "..." : "Desfazer"}
+              </button>
+            </div>
+          </div>
+        )}
         {/* Sem plano */}
         {!refeicaoAtiva && (
           <div className="text-center py-12 text-gray-300">
@@ -474,6 +602,9 @@ export default function TelaRefeicoes() {
           {refeicaoAtiva?.opcoes.map((opcao, opcaoIdx) => {
             const aberta = opcaoAberta === opcaoIdx;
             const pronta = opcaoProntoParaConcluir(opcao);
+            const status = statusDaOpcao(opcao.numero); // ← novo
+            const concluida = status === "confirmada"; // ← novo
+            const bloqueada = status === "bloqueada"; // ← novo
 
             return (
               <div
@@ -481,7 +612,7 @@ export default function TelaRefeicoes() {
                 className={`bg-white rounded-2xl shadow-sm overflow-hidden
                   border-2 transition-all
                   ${
-                    opcao.concluida
+                    concluida
                       ? "border-green-400"
                       : aberta
                         ? "border-green-300"
@@ -490,12 +621,12 @@ export default function TelaRefeicoes() {
               >
                 {/* Cabeçalho da opção */}
                 <button
-                  onClick={() => !opcao.bloqueada && toggleOpcao(opcaoIdx)}
+                  onClick={() => !bloqueada && toggleOpcao(opcaoIdx)}
                   className={`w-full flex items-center justify-between px-5 py-4
-    ${opcao.bloqueada ? "opacity-40 cursor-not-allowed" : "cursor-pointer"}`}
+    ${bloqueada ? "opacity-40 cursor-not-allowed" : "cursor-pointer"}`}
                 >
                   <div className="flex items-center gap-3">
-                    {opcao.concluida && (
+                    {concluida && (
                       <span
                         className="w-6 h-6 rounded-full bg-green-500
                         flex items-center justify-center text-white text-xs font-bold"
@@ -506,7 +637,7 @@ export default function TelaRefeicoes() {
                     <span className="font-semibold text-gray-800">
                       Opção {opcao.numero}
                     </span>
-                    {opcao.concluida && (
+                    {concluida && (
                       <span className="text-xs text-green-600 font-medium">
                         Feita!
                       </span>
@@ -761,7 +892,7 @@ export default function TelaRefeicoes() {
                       </>
                     )}
 
-                    {!opcao.concluida && (
+                    {!concluida && (
                       <div className="mb-3">
                         <label className="text-xs text-gray-400">
                           Não fez alguma das opções? Conte aqui (opcional)
@@ -784,20 +915,20 @@ export default function TelaRefeicoes() {
                     {/* Botão Fiz essa! */}
                     <button
                       onClick={() =>
-                        pronta && !opcao.concluida && concluirOpcao(opcaoIdx)
+                        pronta && !concluida && concluirOpcao(opcaoIdx)
                       }
-                      disabled={!pronta || opcao.concluida}
+                      disabled={!pronta || concluida}
                       className={`w-full py-3.5 rounded-xl font-bold text-sm
         transition-all active:scale-95
         ${
-          opcao.concluida
+          concluida
             ? "bg-green-100 text-green-600 cursor-default"
             : pronta
               ? "bg-green-500 text-white shadow-md"
               : "bg-gray-100 text-gray-400 cursor-not-allowed"
         }`}
                     >
-                      {opcao.concluida
+                      {concluida
                         ? "✓ Refeição confirmada!"
                         : pronta
                           ? "Fiz essa! ✅"
@@ -814,13 +945,13 @@ export default function TelaRefeicoes() {
               onClick={() => !refeicaoJaResolvida && setModalExtraAberto(true)}
               disabled={refeicaoJaResolvida}
               className={`w-full mt-3 border-2 border-dashed font-medium py-3 rounded-xl text-sm transition-colors
-      ${
-        refeicaoJaResolvida
-          ? "border-gray-100 text-gray-300 cursor-not-allowed"
-          : "border-gray-200 text-gray-400 hover:border-gray-300 hover:text-gray-500"
-      }`}
+              ${
+                refeicaoJaResolvida
+                  ? "border-gray-100 text-gray-300 cursor-not-allowed"
+                  : "border-gray-200 text-gray-400 hover:border-gray-300 hover:text-gray-500"
+              }`}
             >
-              {refeicaoAtiva.extraConfirmada
+              {registroDoDia?.tipoConclusao === "extra"
                 ? "✓ Você registrou o que comeu"
                 : "Não fiz nenhuma dessas — o que você comeu?"}
             </button>

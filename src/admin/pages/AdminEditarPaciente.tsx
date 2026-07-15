@@ -127,14 +127,6 @@ export default function AdminEditarPaciente({
           </select>
         </div>
 
-        {/* ⬅️ novo — botão para o plano alimentar */}
-        <button
-          onClick={() => setEditandoPlano(true)}
-          className="w-full bg-white border-2 border-green-200 text-green-700 font-bold py-4 rounded-2xl flex items-center justify-center gap-2 shadow-sm"
-        >
-          🍽️ Editar plano alimentar
-        </button>
-
         <button
           onClick={salvar}
           disabled={salvando}
