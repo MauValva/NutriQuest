@@ -222,17 +222,16 @@ export default function AdminEditarPlano({ paciente, onVoltar }: Props) {
 
       <div className="max-w-2xl mx-auto px-4 py-6 space-y-3">
         {/* Upload de novo plano via PDF */}
-        <div className="bg-white rounded-2xl p-5 shadow-sm">
+        <div className="bg-white rounded-2xl p-2 shadow-sm">
           <h2 className="font-bold text-gray-700 mb-1">
             📄 Substituir plano via PDF
           </h2>
           <p className="text-xs text-gray-400 mb-4">
-            Enviar um novo PDF substitui completamente o plano atual deste
-            paciente.
+            Enviar um novo PDF substitui o plano atual deste paciente.
           </p>
 
           <label
-            className={`block border-2 border-dashed rounded-2xl p-5 text-center cursor-pointer transition-all
+            className={`block border-2 border-dashed rounded-2xl p-2 text-center cursor-pointer transition-all
               ${
                 processandoUpload
                   ? "border-gray-200 opacity-50 cursor-not-allowed"
@@ -294,7 +293,7 @@ export default function AdminEditarPlano({ paciente, onVoltar }: Props) {
                 return (
                   <div
                     key={tipoInfo.tipo}
-                    className="bg-white rounded-2xl p-5 shadow-sm"
+                    className="bg-white rounded-2xl p-3 shadow-sm"
                   >
                     <div className="flex items-center gap-4">
                       <div className="w-12 h-12 rounded-2xl bg-green-50 flex items-center justify-center text-2xl shrink-0">

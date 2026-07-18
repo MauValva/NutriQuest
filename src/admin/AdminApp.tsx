@@ -3,10 +3,9 @@ import AdminLogin from "./pages/AdminLogin";
 import AdminDashboard from "./pages/AdminDashboard";
 import AdminUploadPaciente from "./pages/AdminUploadPaciente";
 import AdminPaciente from "./pages/AdminPaciente";
-import AdminSelecionarMissoes from "./pages/AdminSelecionarMissoes";
 import type { Nutricionista, Paciente } from "../lib/supabase";
 
-type Tela = "login" | "dashboard" | "upload" | "paciente" | "missoes";
+type Tela = "login" | "dashboard" | "upload" | "paciente";
 
 export default function AdminApp() {
   const [tela, setTela] = useState<Tela>("login");
@@ -29,19 +28,6 @@ export default function AdminApp() {
       <AdminUploadPaciente
         nutri={nutri}
         onVoltar={() => setTela("dashboard")}
-        onConcluido={(paciente) => {
-          setPaciente(paciente);
-          setTela("missoes");
-        }}
-      />
-    );
-  }
-
-  if (tela === "missoes" && pacienteSelecionado) {
-    return (
-      <AdminSelecionarMissoes
-        paciente={pacienteSelecionado}
-        onVoltar={() => setTela("upload")}
         onConcluido={() => setTela("dashboard")}
       />
     );

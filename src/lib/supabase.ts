@@ -89,3 +89,27 @@ export interface Tag {
   categoria: string;
   ativa: boolean;
 }
+
+export interface Paciente {
+  id: string;
+  nutricionista_id: string;
+  nome: string;
+  email: string;
+  senha_temp: string;
+  peso: number;
+  altura: number;
+  data_nascimento?: string | null;
+  objetivo:
+    | "emagrecer"
+    | "manter"
+    | "ganhar"
+    | "performance"
+    | "preparacao_prova";
+  observacoes_anamnese: string;
+  ativa: boolean;
+  jornada_duracao_dias?: number | null; // ← novo
+  jornada_data_inicio?: string | null; // ← novo
+  streak_dias?: number; // ← novo
+  streak_maior?: number; // ← novo
+  streak_verificado_em?: string | null; // ← novo
+}

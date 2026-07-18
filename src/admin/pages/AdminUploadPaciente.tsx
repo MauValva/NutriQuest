@@ -556,7 +556,7 @@ export default function AdminUploadPaciente({
               onClick={() => onConcluido(pacienteCriado!)}
               className="bg-green-500 text-white font-bold px-8 py-3 rounded-2xl"
             >
-              Selecionar Missões →
+              Ir para o Dashboard →
             </button>
           </div>
         )}
