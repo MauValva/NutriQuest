@@ -67,7 +67,7 @@ export default function TelaOnboarding({ onConcluir }: Props) {
 
   return (
     <div
-      className="min-h-screen bg-gradient-to-b from-green-600 to-green-400
+      className="min-h-screen bg-linear-to-b from-green-600 to-green-400
       flex flex-col items-center justify-between px-6 py-12"
     >
       {/* Indicadores */}

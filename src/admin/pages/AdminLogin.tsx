@@ -35,7 +35,7 @@ export default function AdminLogin({ onLogin }: Props) {
 
   return (
     <div
-      className="min-h-screen bg-gradient-to-br from-green-700 to-green-500
+      className="min-h-screen bg-linear-to-br from-green-700 to-green-500
       flex items-center justify-center px-6"
     >
       <div className="bg-white rounded-3xl shadow-2xl p-8 w-full max-w-sm">
