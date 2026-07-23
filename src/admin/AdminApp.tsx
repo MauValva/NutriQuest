@@ -5,12 +5,26 @@ import AdminUploadPaciente from "./pages/AdminUploadPaciente";
 import AdminPaciente from "./pages/AdminPaciente";
 import type { Nutricionista, Paciente } from "../lib/supabase";
 
-type Tela = "login" | "dashboard" | "upload" | "paciente";
+import AdminCadastro from "./pages/AdminCadastro";
+
+type Tela = "login" | "cadastro" | "dashboard" | "upload" | "paciente";
 
 export default function AdminApp() {
   const [tela, setTela] = useState<Tela>("login");
   const [nutri, setNutri] = useState<Nutricionista | null>(null);
   const [pacienteSelecionado, setPaciente] = useState<Paciente | null>(null);
+
+  if (tela === "cadastro") {
+    return (
+      <AdminCadastro
+        onVoltar={() => setTela("login")}
+        onCadastrado={(n) => {
+          setNutri(n);
+          setTela("dashboard");
+        }}
+      />
+    );
+  }
 
   if (tela === "login" || !nutri) {
     return (
@@ -19,6 +33,7 @@ export default function AdminApp() {
           setNutri(n);
           setTela("dashboard");
         }}
+        onCadastrar={() => setTela("cadastro")}
       />
     );
   }

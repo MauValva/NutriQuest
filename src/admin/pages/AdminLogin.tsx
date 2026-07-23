@@ -4,9 +4,10 @@ import type { Nutricionista } from "../../lib/supabase";
 
 interface Props {
   onLogin: (nutri: Nutricionista) => void;
+  onCadastrar: () => void;
 }
 
-export default function AdminLogin({ onLogin }: Props) {
+export default function AdminLogin({ onLogin, onCadastrar }: Props) {
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
   const [mostrarSenha, setMostrarSenha] = useState(false);
@@ -109,6 +110,17 @@ export default function AdminLogin({ onLogin }: Props) {
             {carregando ? "🔍 Verificando..." : "Entrar no Painel"}
           </button>
         </div>
+
+        {/* ← novo — link para cadastro, logo abaixo do botão de entrar */}
+        <p className="text-center text-sm text-gray-500 mt-5">
+          Ainda não tem conta?{" "}
+          <button
+            onClick={onCadastrar}
+            className="text-green-600 font-bold hover:underline"
+          >
+            Criar conta grátis
+          </button>
+        </p>
 
         <p className="text-center text-xs text-gray-300 mt-6">
           Acesso exclusivo para nutricionistas

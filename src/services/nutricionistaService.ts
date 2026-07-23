@@ -1,4 +1,9 @@
-import { supabase, type Paciente, type MissaoDB } from "../lib/supabase";
+import {
+  supabase,
+  type Paciente,
+  type MissaoDB,
+  type Nutricionista,
+} from "../lib/supabase";
 
 // ── Login da nutricionista ────────────────────────────
 export async function loginNutricionista(email: string, senha: string) {
@@ -6,11 +11,10 @@ export async function loginNutricionista(email: string, senha: string) {
     .from("nutricionistas")
     .select("*")
     .eq("email", email.toLowerCase().trim())
+    .eq("senha", senha)
     .single();
 
   if (error || !data) return null;
-  // Por enquanto senha fixa — depois migra para Supabase Auth
-  if (senha !== "nutri@2025") return null;
   return data;
 }
 
@@ -27,11 +31,62 @@ export async function listarPacientes(nutricionistaId: string) {
   return data as Paciente[];
 }
 
+export async function cadastrarNutricionista(dados: {
+  nome: string;
+  email: string;
+  crn: string;
+  whatsapp: string;
+  senha: string;
+}): Promise<{ nutri: Nutricionista | null; erro: string | null }> {
+  const { data, error } = await supabase
+    .from("nutricionistas")
+    .insert({
+      nome: dados.nome,
+      email: dados.email.toLowerCase().trim(),
+      crn: dados.crn,
+      whatsapp: dados.whatsapp,
+      senha: dados.senha,
+      plano: "gratis",
+    })
+    .select()
+    .single();
+
+  if (error) {
+    if (error.code === "23505") {
+      return { nutri: null, erro: "Este email já está cadastrado." };
+    }
+    console.error("Erro ao cadastrar nutricionista:", error);
+    return { nutri: null, erro: "Erro ao cadastrar. Tente novamente." };
+  }
+
+  return { nutri: data as Nutricionista, erro: null };
+}
+
 // ── Cadastrar novo paciente ───────────────────────────
 export async function cadastrarPaciente(
   nutricionistaId: string,
   dados: Omit<Paciente, "id" | "nutricionista_id" | "ativa">,
-): Promise<Paciente | null> {
+): Promise<Paciente | { erro: string } | null> {
+  const { data: nutri } = await supabase
+    .from("nutricionistas")
+    .select("plano")
+    .eq("id", nutricionistaId)
+    .single();
+
+  if (nutri?.plano === "gratis") {
+    const { count } = await supabase
+      .from("pacientes")
+      .select("id", { count: "exact", head: true })
+      .eq("nutricionista_id", nutricionistaId)
+      .eq("ativa", true);
+
+    if ((count ?? 0) >= 1) {
+      return {
+        erro: "Seu plano grátis permite apenas 1 paciente. Assine o serviço ou remova o paciente atual para cadastrar um novo.",
+      };
+    }
+  }
+
   const { data, error } = await supabase
     .from("pacientes")
     .insert({

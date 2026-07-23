@@ -119,7 +119,7 @@ export default function AdminUploadPaciente({
 
       // ETAPA 2 — Cadastrar paciente
       setProgressoMsg("👤 Cadastrando paciente...");
-      const paciente = await cadastrarPaciente(nutri.id, {
+      const resultado = await cadastrarPaciente(nutri.id, {
         nome: dadosAnamnese.nome,
         email: emailGerado,
         senha_temp: senhaGerada,
@@ -130,12 +130,19 @@ export default function AdminUploadPaciente({
         observacoes_anamnese: textoAnamnese.slice(0, 2000),
       });
 
-      if (!paciente) {
+      if (!resultado) {
         setErro("Erro ao criar paciente. Email pode já estar em uso.");
         setEtapa("upload");
         return;
       }
 
+      if ("erro" in resultado) {
+        setErro(resultado.erro);
+        setEtapa("upload");
+        return;
+      }
+
+      const paciente = resultado; // TypeScript já entende que é Paciente aqui
       setPacienteCriado(paciente);
 
       // ETAPA 3 — Plano alimentar com regex
