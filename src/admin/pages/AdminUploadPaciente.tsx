@@ -9,6 +9,7 @@ import {
   cadastrarPaciente,
   salvarPlanoAlimentar,
   atualizarPaciente,
+  emailPacienteDisponivel, // ← novo
 } from "../../services/nutricionistaService";
 
 interface DadosExtraidos {
@@ -83,6 +84,7 @@ export default function AdminUploadPaciente({
   const [objetivo, setObjetivo] = useState<"emagrecer" | "manter" | "ganhar">(
     "manter",
   );
+  const [avisoEmailAjustado, setAvisoEmailAjustado] = useState(false);
 
   async function processarPDFs() {
     if (!arquivoAnamnese) {
@@ -131,7 +133,7 @@ export default function AdminUploadPaciente({
       });
 
       if (!resultado) {
-        setErro("Erro ao criar paciente. Email pode já estar em uso.");
+        setErro("Erro ao criar paciente. Tente novamente.");
         setEtapa("upload");
         return;
       }
@@ -142,7 +144,13 @@ export default function AdminUploadPaciente({
         return;
       }
 
-      const paciente = resultado; // TypeScript já entende que é Paciente aqui
+      const { paciente, emailFoiAjustado } = resultado;
+
+      if (emailFoiAjustado) {
+        setEmail(paciente.email);
+        setAvisoEmailAjustado(true);
+      }
+
       setPacienteCriado(paciente);
 
       // ETAPA 3 — Plano alimentar com regex
@@ -171,7 +179,23 @@ export default function AdminUploadPaciente({
   async function salvarTudo() {
     if (!pacienteCriado) return;
 
+    const emailValido = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+    if (!emailValido) {
+      setErro("Informe um email válido antes de salvar.");
+      return;
+    }
+
     setSalvando(true);
+    setErro("");
+
+    const disponivel = await emailPacienteDisponivel(email, pacienteCriado.id);
+    if (!disponivel) {
+      setErro(
+        "Este email já está em uso por outro paciente. Escolha outro para continuar.",
+      );
+      setSalvando(false);
+      return;
+    }
 
     const atualizado = await atualizarPaciente(pacienteCriado.id, {
       nome,
@@ -189,7 +213,6 @@ export default function AdminUploadPaciente({
     }
 
     setPacienteCriado(atualizado);
-
     setSalvando(false);
     setEtapa("salvo");
   }
@@ -382,6 +405,16 @@ export default function AdminUploadPaciente({
                   <p className="text-xs text-gray-400 mt-1">
                     Sugerido automaticamente — confirme com a paciente
                   </p>
+
+                  {avisoEmailAjustado && (
+                    <div className="mt-2 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+                      <p className="text-xs text-amber-700">
+                        ⚠️ O email sugerido já estava em uso por outro paciente.
+                        Ajustamos automaticamente — revise e escolha um email
+                        definitivo antes de salvar.
+                      </p>
+                    </div>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-3 gap-2">
@@ -510,6 +543,12 @@ export default function AdminUploadPaciente({
                 )}
               </div>
             </div>
+            {erro && (
+              <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+                <p className="text-red-600 text-sm text-center">{erro}</p>
+              </div>
+            )}
+
             <button
               onClick={salvarTudo}
               disabled={salvando}

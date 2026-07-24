@@ -66,7 +66,9 @@ export async function cadastrarNutricionista(dados: {
 export async function cadastrarPaciente(
   nutricionistaId: string,
   dados: Omit<Paciente, "id" | "nutricionista_id" | "ativa">,
-): Promise<Paciente | { erro: string } | null> {
+): Promise<
+  { paciente: Paciente; emailFoiAjustado: boolean } | { erro: string } | null
+> {
   const { data: nutri } = await supabase
     .from("nutricionistas")
     .select("plano")
@@ -87,23 +89,57 @@ export async function cadastrarPaciente(
     }
   }
 
-  const { data, error } = await supabase
-    .from("pacientes")
-    .insert({
-      ...dados,
-      nutricionista_id: nutricionistaId,
-      email: dados.email.toLowerCase().trim(),
-    })
-    .select()
-    .single();
+  const emailBase = dados.email.toLowerCase().trim();
+  let emailTentativa = emailBase;
+  let emailFoiAjustado = false;
 
-  if (error || !data) {
+  for (let tentativa = 0; tentativa < 5; tentativa++) {
+    const { data, error } = await supabase
+      .from("pacientes")
+      .insert({
+        ...dados,
+        nutricionista_id: nutricionistaId,
+        email: emailTentativa,
+      })
+      .select()
+      .single();
+
+    if (!error) {
+      return { paciente: data as Paciente, emailFoiAjustado };
+    }
+
+    if (error.code === "23505") {
+      const sufixo = Math.floor(100 + Math.random() * 900);
+      const [usuario, dominio] = emailBase.split("@");
+      emailTentativa = `${usuario}${sufixo}@${dominio}`;
+      emailFoiAjustado = true;
+      continue;
+    }
+
     console.error("Erro ao cadastrar paciente:", error);
     return null;
   }
-  return data as Paciente;
+
+  return null; // esgotou tentativas — extremamente improvável
 }
 
+// ── Verifica se um email já está em uso por outro paciente ──
+export async function emailPacienteDisponivel(
+  email: string,
+  excluirPacienteId?: string,
+): Promise<boolean> {
+  let query = supabase
+    .from("pacientes")
+    .select("id")
+    .eq("email", email.toLowerCase().trim());
+
+  if (excluirPacienteId) {
+    query = query.neq("id", excluirPacienteId);
+  }
+
+  const { data } = await query.maybeSingle();
+  return !data;
+}
 // ── Salvar missões sugeridas ──────────────────────────
 export async function salvarMissoes(
   missoes: Omit<MissaoDB, "id">[],
