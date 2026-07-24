@@ -37,6 +37,7 @@ export default function AdminNovoPaciente({
 
     const paciente = await cadastrarPaciente(nutri.id, {
       nome,
+      apelido: "",
       email,
       senha_temp: senha,
       peso: Number(peso),
