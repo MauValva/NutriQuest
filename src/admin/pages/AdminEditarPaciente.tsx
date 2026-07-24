@@ -16,7 +16,11 @@ export default function AdminEditarPaciente({
   onSalvo,
 }: Props) {
   const [nome, setNome] = useState(paciente.nome);
-  const [email, setEmail] = useState(paciente.email);
+  const DOMINIO_EMAIL = "@nutriquest.com";
+  const [apelido, setApelido] = useState(paciente.apelido ?? "");
+  const [emailLocal, setEmailLocal] = useState(
+    paciente.email.replace(DOMINIO_EMAIL, ""),
+  );
   const [peso, setPeso] = useState(String(paciente.peso));
   const [altura, setAltura] = useState(String(paciente.altura));
   const [dataNascimento, setDataNascimento] = useState(
@@ -52,11 +56,14 @@ export default function AdminEditarPaciente({
   async function salvar() {
     setSalvando(true);
 
+    const emailCompleto = `${emailLocal.trim().toLowerCase()}${DOMINIO_EMAIL}`;
+
     const { data, error } = await supabase
       .from("pacientes")
       .update({
         nome,
-        email,
+        apelido: apelido.trim(),
+        email: emailCompleto,
         peso: Number(peso),
         altura: Number(altura),
         data_nascimento: dataNascimento || null,
@@ -99,7 +106,6 @@ export default function AdminEditarPaciente({
         <div className="bg-white rounded-2xl p-5 shadow">
           {[
             { label: "Nome", value: nome, setter: setNome },
-            { label: "Email", value: email, setter: setEmail },
             { label: "Peso", value: peso, setter: setPeso },
             { label: "Altura", value: altura, setter: setAltura },
           ].map((campo) => (
@@ -112,7 +118,30 @@ export default function AdminEditarPaciente({
               />
             </div>
           ))}
+          <div className="mb-3">
+            <label className="text-xs text-gray-400">Apelido</label>
+            <input
+              value={apelido}
+              onChange={(e) => setApelido(e.target.value)}
+              className="w-full border rounded-xl px-3 py-2 mt-1"
+            />
+          </div>
 
+          <div className="mb-3">
+            <label className="text-xs text-gray-400">Email</label>
+            <div className="flex items-center border rounded-xl mt-1 overflow-hidden">
+              <input
+                value={emailLocal}
+                onChange={(e) =>
+                  setEmailLocal(e.target.value.replace(/[@\s]/g, ""))
+                }
+                className="flex-1 px-3 py-2 outline-none"
+              />
+              <span className="px-3 py-2 bg-gray-50 text-gray-400 text-sm whitespace-nowrap">
+                {DOMINIO_EMAIL}
+              </span>
+            </div>
+          </div>
           <label className="text-xs text-gray-400">Nascimento</label>
           <input
             type="date"

@@ -72,6 +72,11 @@ export default function AdminApp() {
         setPaciente(p);
         setTela("paciente");
       }}
+      onNutriAtualizada={(n) => setNutri(n)}
+      onContaExcluida={() => {
+        setNutri(null);
+        setTela("login");
+      }}
     />
   );
 }

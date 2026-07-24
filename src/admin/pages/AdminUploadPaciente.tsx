@@ -18,7 +18,12 @@ interface DadosExtraidos {
   altura: number;
   idade: number;
   data_nascimento?: string | null;
-  objetivo: "emagrecer" | "manter" | "ganhar";
+  objetivo:
+    | "emagrecer"
+    | "manter"
+    | "ganhar"
+    | "performance"
+    | "preparacao_prova";
   dificuldades: {
     agua: boolean;
     refeicoes: boolean;
@@ -81,10 +86,11 @@ export default function AdminUploadPaciente({
   const [peso, setPeso] = useState("");
   const [altura, setAltura] = useState("");
   const [dataNascimento, setDataNascimento] = useState("");
-  const [objetivo, setObjetivo] = useState<"emagrecer" | "manter" | "ganhar">(
-    "manter",
-  );
+  const [objetivo, setObjetivo] = useState<
+    "emagrecer" | "manter" | "ganhar" | "performance" | "preparacao_prova"
+  >("manter");
   const [avisoEmailAjustado, setAvisoEmailAjustado] = useState(false);
+  const [apelido, setApelido] = useState("");
 
   async function processarPDFs() {
     if (!arquivoAnamnese) {
@@ -123,6 +129,7 @@ export default function AdminUploadPaciente({
       setProgressoMsg("👤 Cadastrando paciente...");
       const resultado = await cadastrarPaciente(nutri.id, {
         nome: dadosAnamnese.nome,
+        apelido: "", // preenchido pela nutri na etapa de revisão
         email: emailGerado,
         senha_temp: senhaGerada,
         peso: dadosAnamnese.peso,
@@ -179,6 +186,11 @@ export default function AdminUploadPaciente({
   async function salvarTudo() {
     if (!pacienteCriado) return;
 
+    if (!apelido.trim()) {
+      setErro("Informe um apelido para o paciente antes de salvar.");
+      return;
+    }
+
     const emailValido = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
     if (!emailValido) {
       setErro("Informe um email válido antes de salvar.");
@@ -199,6 +211,7 @@ export default function AdminUploadPaciente({
 
     const atualizado = await atualizarPaciente(pacienteCriado.id, {
       nome,
+      apelido: apelido.trim(),
       email,
       peso: Number(peso),
       altura: Number(altura),
@@ -390,9 +403,21 @@ export default function AdminUploadPaciente({
                     className="w-full mt-1 border border-gray-200 rounded-xl px-4 py-2
                       outline-none focus:border-green-400 text-sm"
                   />
-                </div>
-
-                <div>
+                  <div>
+                    <label className="text-xs font-bold text-gray-400 uppercase">
+                      Apelido <span className="text-red-400">*obrigatório</span>
+                    </label>
+                    <input
+                      value={apelido}
+                      onChange={(e) => setApelido(e.target.value)}
+                      placeholder="Ex: Ju, Miguel, Carlinhos..."
+                      className="w-full mt-1 border border-gray-200 rounded-xl px-4 py-2
+                      outline-none focus:border-green-400 text-sm"
+                    />
+                    <p className="text-xs text-gray-400 mt-1">
+                      Aparece na sua lista de pacientes em vez do email
+                    </p>
+                  </div>
                   <label className="text-xs font-bold text-gray-400 uppercase">
                     Email de acesso
                   </label>
@@ -456,7 +481,7 @@ export default function AdminUploadPaciente({
                   <label className="text-xs font-bold text-gray-400 uppercase">
                     Objetivo
                   </label>
-                  <div className="flex gap-2 mt-2">
+                  <div className="grid grid-cols-3 gap-2 mt-2">
                     {[
                       {
                         tipo: "emagrecer" as const,
@@ -465,11 +490,21 @@ export default function AdminUploadPaciente({
                       },
                       { tipo: "manter" as const, icone: "⚖️", label: "Manter" },
                       { tipo: "ganhar" as const, icone: "📈", label: "Ganhar" },
+                      {
+                        tipo: "performance" as const,
+                        icone: "🔥",
+                        label: "Performance",
+                      },
+                      {
+                        tipo: "preparacao_prova" as const,
+                        icone: "🏃",
+                        label: "Prova",
+                      },
                     ].map((o) => (
                       <button
                         key={o.tipo}
                         onClick={() => setObjetivo(o.tipo)}
-                        className={`flex-1 flex flex-col items-center gap-1 py-2 rounded-xl
+                        className={`flex flex-col items-center gap-1 py-2 rounded-xl
                           border-2 transition-all text-xs
                           ${
                             objetivo === o.tipo

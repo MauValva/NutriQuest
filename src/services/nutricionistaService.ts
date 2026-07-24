@@ -62,6 +62,65 @@ export async function cadastrarNutricionista(dados: {
   return { nutri: data as Nutricionista, erro: null };
 }
 
+export async function listarPacientesTodos(
+  nutricionistaId: string,
+): Promise<Paciente[]> {
+  const { data, error } = await supabase
+    .from("pacientes")
+    .select("*")
+    .eq("nutricionista_id", nutricionistaId)
+    .order("created_at", { ascending: false });
+
+  if (error || !data) return [];
+  return data as Paciente[];
+}
+
+export async function atualizarNutricionista(
+  nutricionistaId: string,
+  dados: Partial<Pick<Nutricionista, "nome" | "email" | "crn" | "whatsapp">>,
+): Promise<Nutricionista | null> {
+  const { data, error } = await supabase
+    .from("nutricionistas")
+    .update(dados)
+    .eq("id", nutricionistaId)
+    .select()
+    .single();
+
+  if (error) {
+    console.error("Erro ao atualizar nutricionista:", error);
+    return null;
+  }
+  return data as Nutricionista;
+}
+
+export async function excluirNutricionista(
+  nutricionistaId: string,
+): Promise<{ sucesso: boolean; erro?: string }> {
+  const { count } = await supabase
+    .from("pacientes")
+    .select("id", { count: "exact", head: true })
+    .eq("nutricionista_id", nutricionistaId);
+
+  if ((count ?? 0) > 0) {
+    return {
+      sucesso: false,
+      erro: "Você ainda tem pacientes cadastrados. Exclua-os antes de encerrar sua conta.",
+    };
+  }
+
+  const { error } = await supabase
+    .from("nutricionistas")
+    .delete()
+    .eq("id", nutricionistaId);
+
+  if (error) {
+    console.error("Erro ao excluir nutricionista:", error);
+    return { sucesso: false, erro: "Erro ao excluir conta." };
+  }
+
+  return { sucesso: true };
+}
+
 // ── Cadastrar novo paciente ───────────────────────────
 export async function cadastrarPaciente(
   nutricionistaId: string,

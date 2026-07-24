@@ -94,6 +94,7 @@ export interface Paciente {
   id: string;
   nutricionista_id: string;
   nome: string;
+  apelido: string; // ← novo
   email: string;
   senha_temp: string;
   peso: number;
@@ -107,9 +108,9 @@ export interface Paciente {
     | "preparacao_prova";
   observacoes_anamnese: string;
   ativa: boolean;
-  jornada_duracao_dias?: number | null; // ← novo
-  jornada_data_inicio?: string | null; // ← novo
-  streak_dias?: number; // ← novo
-  streak_maior?: number; // ← novo
-  streak_verificado_em?: string | null; // ← novo
+  jornada_duracao_dias?: number | null;
+  jornada_data_inicio?: string | null;
+  streak_dias?: number;
+  streak_maior?: number;
+  streak_verificado_em?: string | null;
 }
