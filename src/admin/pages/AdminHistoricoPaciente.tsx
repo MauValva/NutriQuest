@@ -2,7 +2,9 @@ import { useEffect, useState } from "react";
 import type { Paciente } from "../../lib/supabase";
 import {
   buscarHistoricoPacienteData,
+  buscarResumoAdesao,
   type HistoricoItemRefeicao,
+  type ResumoAdesao,
 } from "../../services/nutricionistaService";
 
 interface Props {
@@ -23,10 +25,21 @@ function dataHojeStr(): string {
   return new Date().toISOString().split("T")[0];
 }
 
+function formatarDataBr(dataStr: string): string {
+  const [ano, mes, dia] = dataStr.split("-");
+  return `${dia}/${mes}/${ano}`;
+}
+
 export default function AdminHistoricoPaciente({ paciente, onVoltar }: Props) {
   const [data, setData] = useState(dataHojeStr());
   const [historico, setHistorico] = useState<HistoricoItemRefeicao[]>([]);
   const [carregando, setCarregando] = useState(true);
+
+  const [resumo, setResumo] = useState<ResumoAdesao | null>(null);
+
+  useEffect(() => {
+    buscarResumoAdesao(paciente).then(setResumo);
+  }, [paciente]);
 
   useEffect(() => {
     async function carregar() {
@@ -67,6 +80,60 @@ export default function AdminHistoricoPaciente({ paciente, onVoltar }: Props) {
           <p className="text-xs text-gray-400">{paciente.nome}</p>
         </div>
       </div>
+
+      {resumo && (
+        <div className="bg-white rounded-2xl p-5 shadow-sm">
+          <h2 className="font-bold text-gray-700 mb-3">📊 Resumo geral</h2>
+
+          <div className="grid grid-cols-2 gap-3 mb-4">
+            <div className="bg-gray-50 rounded-xl p-3 text-center">
+              <p className="text-xl font-bold text-gray-800">
+                {resumo.completas + resumo.parciais + resumo.extras}/
+                {resumo.refeicoesEsperadas}
+              </p>
+              <p className="text-xs text-gray-400">refeições registradas</p>
+            </div>
+            <div className="bg-gray-50 rounded-xl p-3 text-center">
+              <p className="text-xl font-bold text-green-600">
+                {resumo.percentualAdesao}%
+              </p>
+              <p className="text-xs text-gray-400">de adesão ao plano</p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-2 mb-3">
+            <span className="text-xs font-bold px-2 py-1 rounded-full bg-green-100 text-green-700">
+              ✅ {resumo.completas} completas
+            </span>
+            <span className="text-xs font-bold px-2 py-1 rounded-full bg-yellow-100 text-yellow-700">
+              🟡 {resumo.parciais} parciais
+            </span>
+            <span className="text-xs font-bold px-2 py-1 rounded-full bg-orange-100 text-orange-700">
+              📝 {resumo.extras} fora do plano
+            </span>
+            <span className="text-xs font-bold px-2 py-1 rounded-full bg-gray-100 text-gray-500">
+              ⬜ {resumo.naoRegistradas} não registradas
+            </span>
+          </div>
+
+          <div className="flex items-center justify-between text-xs text-gray-400 border-t border-gray-50 pt-3">
+            <span>
+              🔥 Streak atual:{" "}
+              <span className="font-bold text-gray-600">
+                {resumo.streakAtual} dias
+              </span>
+            </span>
+            <span>
+              Última refeição:{" "}
+              <span className="font-bold text-gray-600">
+                {resumo.ultimaRefeicaoData
+                  ? formatarDataBr(resumo.ultimaRefeicaoData)
+                  : "—"}
+              </span>
+            </span>
+          </div>
+        </div>
+      )}
 
       <div className="max-w-2xl mx-auto px-4 py-6 space-y-4">
         <div className="bg-white rounded-2xl p-4 shadow-sm flex items-center justify-between gap-3">

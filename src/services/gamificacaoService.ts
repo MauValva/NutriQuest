@@ -97,7 +97,7 @@ export async function verificarEConcederPasseLivre(
     .eq("usado", false)
     .maybeSingle();
 
-  if (disponivel) return; // já tem um disponível — não concede outro (vaga única)
+  if (disponivel) return;
 
   const { data: ultimoUsado } = await supabase
     .from("passes_livres")
@@ -113,9 +113,21 @@ export async function verificarEConcederPasseLivre(
     .select("id", { count: "exact", head: true })
     .eq("paciente_id", pacienteId);
 
-  // Nunca recebeu nenhum passe — concede o primeiro
+  async function concederComSeguranca() {
+    const { error } = await supabase
+      .from("passes_livres")
+      .insert({ paciente_id: pacienteId });
+
+    // Se outra chamada concorrente já inseriu um passe disponível
+    // nesse meio-tempo, o índice único recusa esta — e está tudo bem,
+    // o objetivo (ter 1 passe disponível) já foi cumprido pela outra.
+    if (error && error.code !== "23505") {
+      console.error("Erro ao conceder passe livre:", error);
+    }
+  }
+
   if (!ultimoUsado && (totalConcedidos ?? 0) === 0) {
-    await supabase.from("passes_livres").insert({ paciente_id: pacienteId });
+    await concederComSeguranca();
     return;
   }
 
@@ -126,7 +138,7 @@ export async function verificarEConcederPasseLivre(
         86400000,
     );
     if (dias >= 15) {
-      await supabase.from("passes_livres").insert({ paciente_id: pacienteId });
+      await concederComSeguranca();
     }
   }
 }
@@ -146,57 +158,103 @@ export async function contarPassesUsadosNaJornada(
 }
 
 // ── Streak (sequência) ─────────────────────────────────
+const MAX_DIAS_RETROSPECTO = 90;
+
 export async function atualizarStreak(
   pacienteId: string,
 ): Promise<{ streakDias: number; streakMaior: number }> {
-  const { data: paciente } = await supabase
+  const { data: pacienteRow } = await supabase
     .from("pacientes")
-    .select("streak_dias, streak_maior, streak_verificado_em")
+    .select("jornada_data_inicio, created_at, streak_maior")
     .eq("id", pacienteId)
     .single();
 
-  if (!paciente) return { streakDias: 0, streakMaior: 0 };
+  if (!pacienteRow) return { streakDias: 0, streakMaior: 0 };
 
-  let streak = paciente.streak_dias ?? 0;
-  let maior = paciente.streak_maior ?? 0;
   const hoje = dataHojeStr();
-
-  if (paciente.streak_verificado_em === hoje) {
-    return { streakDias: streak, streakMaior: maior };
-  }
-
   const ontem = addDiasStr(hoje, -1);
-  let cursor = paciente.streak_verificado_em
-    ? addDiasStr(paciente.streak_verificado_em, 1)
-    : ontem;
+  const limiteMinimo = addDiasStr(hoje, -MAX_DIAS_RETROSPECTO);
 
-  const dias: string[] = [];
-  while (cursor <= ontem) {
-    dias.push(cursor);
-    cursor = addDiasStr(cursor, 1);
+  let limite =
+    pacienteRow.jornada_data_inicio ??
+    pacienteRow.created_at?.slice(0, 10) ??
+    limiteMinimo;
+  if (limite < limiteMinimo) limite = limiteMinimo;
+
+  // Total de refeições ativas no plano (mesma regra usada em calcularCumprimentoDia)
+  const { data: plano } = await supabase
+    .from("refeicoes_plano")
+    .select("opcoes")
+    .eq("paciente_id", pacienteId);
+
+  const totalPlanejadas = (
+    (plano ?? []) as Array<{ opcoes: Array<{ itens?: unknown[] }> }>
+  ).filter(
+    (r) =>
+      Array.isArray(r.opcoes) &&
+      r.opcoes.some((op) => (op.itens?.length ?? 0) > 0),
+  ).length;
+
+  if (totalPlanejadas === 0) {
+    return { streakDias: 0, streakMaior: pacienteRow.streak_maior ?? 0 };
   }
 
-  for (const dia of dias) {
-    const { percentual } = await calcularCumprimentoDia(pacienteId, dia);
-    if (percentual >= 0.5) {
+  // Uma única query pra todo o intervalo, em vez de uma por dia
+  const { data: registros } = await supabase
+    .from("refeicoes_registradas")
+    .select("data")
+    .eq("paciente_id", pacienteId)
+    .gte("data", limite)
+    .lte("data", ontem);
+
+  const contagemPorDia = new Map<string, number>();
+  for (const r of registros ?? []) {
+    contagemPorDia.set(r.data, (contagemPorDia.get(r.data) ?? 0) + 1);
+  }
+
+  const { data: passesUsados } = await supabase
+    .from("passes_livres")
+    .select("usado_em")
+    .eq("paciente_id", pacienteId)
+    .eq("usado", true);
+
+  const diasProtegidos = new Set(
+    (passesUsados ?? []).map((p) => p.usado_em).filter((d): d is string => !!d),
+  );
+
+  let streak = 0;
+  let cursor = ontem;
+
+  while (cursor >= limite) {
+    const feitas = contagemPorDia.get(cursor) ?? 0;
+    const percentual = feitas / totalPlanejadas;
+
+    if (percentual >= 0.5 || diasProtegidos.has(cursor)) {
       streak += 1;
     } else {
-      const protegido = await consumirPasseLivre(pacienteId, dia);
-      if (!protegido) streak = 0;
+      const protegido = await consumirPasseLivre(pacienteId, cursor);
+      if (protegido) {
+        streak += 1;
+      } else {
+        break; // sequência quebra aqui
+      }
     }
-    if (streak > maior) maior = streak;
+
+    cursor = addDiasStr(cursor, -1);
   }
+
+  const maiorFinal = Math.max(pacienteRow.streak_maior ?? 0, streak);
 
   await supabase
     .from("pacientes")
     .update({
       streak_dias: streak,
-      streak_maior: maior,
+      streak_maior: maiorFinal,
       streak_verificado_em: hoje,
     })
     .eq("id", pacienteId);
 
-  return { streakDias: streak, streakMaior: maior };
+  return { streakDias: streak, streakMaior: maiorFinal };
 }
 
 // ── Streak de missão  ──

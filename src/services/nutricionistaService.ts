@@ -121,6 +121,87 @@ export async function excluirNutricionista(
   return { sucesso: true };
 }
 
+export interface ResumoAdesao {
+  refeicoesEsperadas: number;
+  completas: number;
+  parciais: number;
+  extras: number;
+  naoRegistradas: number;
+  percentualAdesao: number;
+  streakAtual: number;
+  ultimaRefeicaoData: string | null;
+}
+
+export async function buscarResumoAdesao(
+  paciente: Paciente,
+): Promise<ResumoAdesao> {
+  const { data: plano } = await supabase
+    .from("refeicoes_plano")
+    .select("opcoes")
+    .eq("paciente_id", paciente.id);
+
+  const refeicoesAtivas = (
+    (plano ?? []) as Array<{ opcoes: Array<{ itens?: unknown[] }> }>
+  ).filter(
+    (r) =>
+      Array.isArray(r.opcoes) &&
+      r.opcoes.some((op) => (op.itens?.length ?? 0) > 0),
+  ).length;
+
+  const dataInicio =
+    paciente.jornada_data_inicio ?? paciente.created_at?.slice(0, 10) ?? null;
+
+  let diasDecorridos = 0;
+  if (dataInicio) {
+    const hoje = new Date();
+    const inicio = new Date(dataInicio + "T00:00:00");
+    diasDecorridos =
+      Math.max(0, Math.floor((hoje.getTime() - inicio.getTime()) / 86400000)) +
+      1;
+    if (paciente.jornada_duracao_dias) {
+      diasDecorridos = Math.min(diasDecorridos, paciente.jornada_duracao_dias);
+    }
+  }
+
+  const refeicoesEsperadas = refeicoesAtivas * diasDecorridos;
+
+  const { data: registros } = await supabase
+    .from("refeicoes_registradas")
+    .select("tipo_conclusao, data")
+    .eq("paciente_id", paciente.id)
+    .order("data", { ascending: false });
+
+  const completas = (registros ?? []).filter(
+    (r) => r.tipo_conclusao === "completa",
+  ).length;
+  const parciais = (registros ?? []).filter(
+    (r) => r.tipo_conclusao === "parcial",
+  ).length;
+  const extras = (registros ?? []).filter(
+    (r) => r.tipo_conclusao === "extra",
+  ).length;
+
+  const registradas = completas + parciais + extras;
+  const naoRegistradas = Math.max(0, refeicoesEsperadas - registradas);
+
+  const pesoTotal = completas * 1 + parciais * 0.5 + extras * 0.2;
+  const percentualAdesao =
+    refeicoesEsperadas > 0
+      ? Math.round((pesoTotal / refeicoesEsperadas) * 100)
+      : 0;
+
+  return {
+    refeicoesEsperadas,
+    completas,
+    parciais,
+    extras,
+    naoRegistradas,
+    percentualAdesao,
+    streakAtual: paciente.streak_dias ?? 0,
+    ultimaRefeicaoData: registros?.[0]?.data ?? null,
+  };
+}
+
 // ── Cadastrar novo paciente ───────────────────────────
 export async function cadastrarPaciente(
   nutricionistaId: string,
