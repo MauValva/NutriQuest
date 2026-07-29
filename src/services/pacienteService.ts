@@ -2,13 +2,20 @@ import { supabase, type Paciente, type MissaoDB } from "../lib/supabase";
 import { calcularTipoConclusao, calcularPontos } from "./pontuacaoService";
 
 export function dataHojeStr(): string {
-  return new Date().toISOString().split("T")[0];
+  const agora = new Date();
+  const ano = agora.getFullYear();
+  const mes = String(agora.getMonth() + 1).padStart(2, "0");
+  const dia = String(agora.getDate()).padStart(2, "0");
+  return `${ano}-${mes}-${dia}`;
 }
 
 export function dataOntemStr(): string {
   const d = new Date();
   d.setDate(d.getDate() - 1);
-  return d.toISOString().split("T")[0];
+  const ano = d.getFullYear();
+  const mes = String(d.getMonth() + 1).padStart(2, "0");
+  const dia = String(d.getDate()).padStart(2, "0");
+  return `${ano}-${mes}-${dia}`;
 }
 
 export function podeEditarData(data: string): boolean {
@@ -22,6 +29,19 @@ export interface RegistroRefeicaoDia {
   observacaoPaciente?: string;
   pontosGanhos: number;
   horario: string;
+}
+
+export async function buscarPontuacaoTotal(
+  pacienteId: string,
+): Promise<number> {
+  const { data, error } = await supabase
+    .from("refeicoes_registradas")
+    .select("pontos_ganhos")
+    .eq("paciente_id", pacienteId);
+
+  if (error || !data) return 0;
+
+  return data.reduce((soma, r) => soma + (r.pontos_ganhos ?? 0), 0);
 }
 
 // ── Login do paciente ─────────────────────────────────

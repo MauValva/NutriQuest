@@ -1,4 +1,7 @@
+import { useEffect, useState } from "react";
 import { useApp } from "../contexts/useApp";
+import { calcularJornada } from "../services/gamificacaoService";
+import { buscarPontuacaoTotal } from "../services/pacienteService";
 
 function calcularIdade(data?: string | null) {
   if (!data) return null;
@@ -18,11 +21,16 @@ function calcularIdade(data?: string | null) {
 }
 
 export default function TelaPerfil() {
-  const { xpTotal, nivel, streakDias, paciente } = useApp();
+  const { streakDias, paciente } = useApp();
+  const jornada = calcularJornada(
+    paciente.jornada_duracao_dias ?? null,
+    paciente.jornada_data_inicio ?? null,
+  );
+  const [pontuacaoTotal, setPontuacaoTotal] = useState<number | null>(null);
 
-  const xpNoNivel = xpTotal % 200;
-  const progressoNivel = xpNoNivel / 200;
-
+  useEffect(() => {
+    buscarPontuacaoTotal(paciente.id).then(setPontuacaoTotal);
+  }, [paciente.id]);
   const objetivoConfig = {
     emagrecer: {
       icone: "📉",
@@ -114,21 +122,19 @@ export default function TelaPerfil() {
 
       <div className="px-4 mt-4 space-y-4">
         {/* Stats */}
-        <div className="grid grid-cols-3 gap-3">
-          {[
-            { icone: "⭐", valor: xpTotal, label: "XP Total" },
-            { icone: "🏅", valor: `Nv ${nivel}`, label: "Nível" },
-            { icone: "🔥", valor: `${streakDias}d`, label: "Streak" },
-          ].map((s) => (
-            <div
-              key={s.label}
-              className="bg-white rounded-2xl p-3 text-center shadow-sm"
-            >
-              <p className="text-2xl">{s.icone}</p>
-              <p className="font-bold text-gray-800 text-lg">{s.valor}</p>
-              <p className="text-xs text-gray-400">{s.label}</p>
-            </div>
-          ))}
+        <div className="grid grid-cols-2 gap-3">
+          <div className="bg-white rounded-2xl p-3 text-center shadow-sm">
+            <p className="text-2xl">⭐</p>
+            <p className="font-bold text-gray-800 text-lg">
+              {pontuacaoTotal === null ? "—" : pontuacaoTotal}
+            </p>
+            <p className="text-xs text-gray-400">Pontos em refeições</p>
+          </div>
+          <div className="bg-white rounded-2xl p-3 text-center shadow-sm">
+            <p className="text-2xl">🔥</p>
+            <p className="font-bold text-gray-800 text-lg">{streakDias}d</p>
+            <p className="text-xs text-gray-400">Streak</p>
+          </div>
         </div>
 
         {/* Objetivo — card motivacional animado */}
@@ -174,25 +180,28 @@ export default function TelaPerfil() {
             </div>
           </div>
 
-          {/* Barra de progresso do nível */}
-          <div className="mt-4">
-            <div className="flex justify-between text-xs mb-1">
-              <span className={obj.sub}>Progresso nível {nivel}</span>
-              <span className={`font-bold ${obj.texto}`}>
-                {xpNoNivel}/200 XP
-              </span>
+          {/* Barra de progresso da jornada */}
+          {jornada.definida && (
+            <div className="mt-4">
+              <div className="flex justify-between text-xs mb-1">
+                <span className={obj.sub}>
+                  Semana {jornada.semanaAtual} de {jornada.totalSemanas}
+                </span>
+                <span className={`font-bold ${obj.texto}`}>
+                  {jornada.diasRestantes > 0
+                    ? `${jornada.diasRestantes} dias p/ retorno`
+                    : "Hora do retorno"}
+                </span>
+              </div>
+              <div className="bg-white/60 rounded-full h-2.5 overflow-hidden">
+                <div
+                  className={`h-2.5 rounded-full bg-linear-to-r ${obj.gradiente}
+                    transition-all duration-700`}
+                  style={{ width: `${jornada.progresso * 100}%` }}
+                />
+              </div>
             </div>
-            <div className="bg-white/60 rounded-full h-2.5 overflow-hidden">
-              <div
-                className={`h-2.5 rounded-full bg-linear-to-r ${obj.gradiente}
-                  transition-all duration-700`}
-                style={{ width: `${progressoNivel * 100}%` }}
-              />
-            </div>
-            <p className={`text-xs ${obj.sub} mt-1 text-right`}>
-              Faltam {200 - xpNoNivel} XP para o nível {nivel + 1}
-            </p>
-          </div>
+          )}
         </div>
 
         {/* Dados pessoais — somente leitura, visual limpo */}

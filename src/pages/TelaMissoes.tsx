@@ -6,13 +6,33 @@ import {
   concluirMissaoDiaria,
   type MissaoDiaria,
 } from "../services/missoesService";
+import {
+  calcularStatsConquistas,
+  CONQUISTAS_DEFS,
+  estaDesbloqueada,
+  type StatsConquistas,
+} from "../services/gamificacaoService";
 
 export default function TelaMissoes() {
   const { paciente } = useApp();
   const [missoes, setMissoes] = useState<MissaoDiaria[]>([]);
   const [carregando, setCarregando] = useState(true);
   const [celebrando, setCelebrando] = useState(false);
+  const [stats, setStats] = useState<StatsConquistas | null>(null);
 
+  useEffect(() => {
+    async function carregar() {
+      await garantirMissoesDoDia(paciente.id);
+      const [lista, statsCalc] = await Promise.all([
+        buscarMissoesDoDia(paciente.id),
+        calcularStatsConquistas(paciente.id),
+      ]);
+      setMissoes(lista);
+      setStats(statsCalc);
+      setCarregando(false);
+    }
+    carregar();
+  }, [paciente.id]);
   useEffect(() => {
     async function carregar() {
       await garantirMissoesDoDia(paciente.id);
@@ -51,7 +71,7 @@ export default function TelaMissoes() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 pb-8">
+    <div className="min-h-screen bg-gray-50 pb-24">
       <div className="bg-green-600 text-white px-5 pt-12 pb-6">
         <h1 className="text-xl font-bold mb-1">Missões de Hoje 🎯</h1>
         <p className="text-green-100 text-sm mb-3">
@@ -120,6 +140,60 @@ export default function TelaMissoes() {
           </p>
         </div>
       )}
+
+      <div className="px-4 mt-6 pb-4">
+        <div className="bg-white rounded-2xl p-5 shadow-sm">
+          <h2 className="font-bold text-gray-700 mb-3">Conquistas</h2>
+          {Array.from(new Set(CONQUISTAS_DEFS.map((d) => d.categoria))).map(
+            (categoria) => {
+              const defs = CONQUISTAS_DEFS.filter(
+                (d) => d.categoria === categoria,
+              );
+              return (
+                <div key={categoria} className="mb-4 last:mb-0">
+                  <p className="text-xs font-bold text-gray-400 uppercase mb-2">
+                    {categoria}
+                  </p>
+                  <div className="flex gap-3 flex-wrap">
+                    {defs.map((def, i) => {
+                      const desbloqueada = stats
+                        ? estaDesbloqueada(def, stats)
+                        : false;
+                      return (
+                        <div
+                          key={i}
+                          className="flex flex-col items-center gap-1 w-16"
+                          title={def.titulo}
+                        >
+                          <div
+                            className={`w-12 h-12 rounded-2xl flex items-center justify-center text-xl whitespace-nowrap
+    ${
+      desbloqueada
+        ? "bg-green-50 shadow-sm"
+        : "bg-gray-100 grayscale opacity-40"
+    }`}
+                          >
+                            {def.icone}
+                          </div>
+                          <p
+                            className={`text-[10px] text-center leading-tight ${
+                              desbloqueada
+                                ? "text-gray-700 font-medium"
+                                : "text-gray-400"
+                            }`}
+                          >
+                            {def.titulo}
+                          </p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            },
+          )}
+        </div>
+      </div>
     </div>
   );
 }

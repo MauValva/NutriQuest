@@ -113,4 +113,5 @@ export interface Paciente {
   streak_dias?: number;
   streak_maior?: number;
   streak_verificado_em?: string | null;
+  created_at?: string;
 }

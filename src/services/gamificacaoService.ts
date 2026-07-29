@@ -426,7 +426,7 @@ export const CONQUISTAS_DEFS: ConquistaDef[] = [
   },
   {
     categoria: "Consistência",
-    icone: "🔥🔥🔥",
+    icone: "🐦‍🔥",
     titulo: "30 dias de streak",
     campo: "streakDias",
     threshold: 30,
@@ -456,7 +456,7 @@ export const CONQUISTAS_DEFS: ConquistaDef[] = [
   },
   {
     categoria: "Missões",
-    icone: "⭐⭐⭐",
+    icone: "💫",
     titulo: "300 missões concluídas",
     campo: "totalMissoesConcluidas",
     threshold: 300,

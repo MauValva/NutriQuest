@@ -3,8 +3,6 @@ import { useApp } from "../contexts/useApp";
 import {
   buscarPlanoAlimentar,
   buscarRegistrosPorData,
-  buscarMissoesPaciente,
-  buscarRegistrosHoje,
   dataHojeStr,
 } from "../services/pacienteService";
 import {
@@ -13,14 +11,14 @@ import {
   calcularCumprimentoDia,
   corDoDia,
   calcularJornada,
-  calcularStatsConquistas,
-  CONQUISTAS_DEFS,
-  estaDesbloqueada,
   verificarEConcederPasseLivre,
   passeLivreDisponivel,
   type Habitos,
-  type StatsConquistas,
 } from "../services/gamificacaoService";
+import {
+  garantirMissoesDoDia,
+  buscarMissoesDoDia,
+} from "../services/missoesService";
 
 const LABELS_REFEICAO: Record<string, { label: string; icone: string }> = {
   cafe: { label: "Café", icone: "🌅" },
@@ -76,12 +74,12 @@ export default function TelaProgresso() {
     exercicio: 0,
     sono: 0,
   });
-  const [stats, setStats] = useState<StatsConquistas | null>(null);
   const [calendario, setCalendario] = useState<DiaCalendario[]>([]);
   const [passeDisponivel, setPasseDisponivel] = useState(false);
 
   useEffect(() => {
     async function carregar() {
+      await garantirMissoesDoDia(paciente.id);
       await verificarEConcederPasseLivre(paciente.id);
 
       const { streakDias: streakAtualizado } = await atualizarStreak(
@@ -96,21 +94,13 @@ export default function TelaProgresso() {
 
       const hoje = dataHojeStr();
 
-      const [
-        plano,
-        registrosHoje,
-        missoesDB,
-        registrosMissoesHoje,
-        habitosCalc,
-        statsCalc,
-      ] = await Promise.all([
-        buscarPlanoAlimentar(paciente.id),
-        buscarRegistrosPorData(paciente.id, hoje),
-        buscarMissoesPaciente(paciente.id),
-        buscarRegistrosHoje(paciente.id),
-        calcularHabitos(paciente.id),
-        calcularStatsConquistas(paciente.id),
-      ]);
+      const [plano, registrosHoje, missoesDoDia, habitosCalc] =
+        await Promise.all([
+          buscarPlanoAlimentar(paciente.id),
+          buscarRegistrosPorData(paciente.id, hoje),
+          buscarMissoesDoDia(paciente.id, hoje),
+          calcularHabitos(paciente.id),
+        ]);
 
       const tiposAtivos = (
         plano as Array<{ tipo: string; opcoes: Array<{ itens: unknown[] }> }>
@@ -126,12 +116,11 @@ export default function TelaProgresso() {
       );
 
       setMissoesHoje({
-        total: missoesDB.length,
-        concluidas: missoesDB.filter((m) => registrosMissoesHoje[m.id]).length,
+        total: missoesDoDia.length,
+        concluidas: missoesDoDia.filter((m) => m.concluida).length,
       });
 
       setHabitos(habitosCalc);
-      setStats(statsCalc);
 
       const dias: { data: string; cor: string; diaSemana: string }[] = [];
       for (let i = 6; i >= 0; i--) {
@@ -168,10 +157,6 @@ export default function TelaProgresso() {
       </div>
     );
   }
-
-  const categorias = Array.from(
-    new Set(CONQUISTAS_DEFS.map((d) => d.categoria)),
-  );
 
   return (
     <div className="min-h-screen bg-gray-50 pb-24">
@@ -282,57 +267,6 @@ export default function TelaProgresso() {
               </div>
             ))}
           </div>
-        </div>
-
-        {/* Conquistas */}
-        <div className="bg-white rounded-2xl p-5 shadow-sm">
-          <h2 className="font-bold text-gray-700 mb-3">Conquistas</h2>
-          {categorias.map((categoria) => {
-            const defs = CONQUISTAS_DEFS.filter(
-              (d) => d.categoria === categoria,
-            );
-            return (
-              <div key={categoria} className="mb-4 last:mb-0">
-                <p className="text-xs font-bold text-gray-400 uppercase mb-2">
-                  {categoria}
-                </p>
-                <div className="flex gap-3">
-                  {defs.map((def, i) => {
-                    const desbloqueada = stats
-                      ? estaDesbloqueada(def, stats)
-                      : false;
-                    return (
-                      <div
-                        key={i}
-                        className="flex flex-col items-center gap-1 flex-1"
-                        title={def.titulo}
-                      >
-                        <div
-                          className={`w-12 h-12 rounded-2xl flex items-center justify-center text-xl
-                            ${
-                              desbloqueada
-                                ? "bg-green-50 shadow-sm"
-                                : "bg-gray-100 grayscale opacity-40"
-                            }`}
-                        >
-                          {def.icone}
-                        </div>
-                        <p
-                          className={`text-[10px] text-center leading-tight ${
-                            desbloqueada
-                              ? "text-gray-700 font-medium"
-                              : "text-gray-400"
-                          }`}
-                        >
-                          {def.titulo}
-                        </p>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })}
         </div>
 
         {/* Calendário */}
