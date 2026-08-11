@@ -13,6 +13,7 @@ import {
   calcularJornada,
   verificarEConcederPasseLivre,
   passeLivreDisponivel,
+  diasProtegidosPorPasse,
   type Habitos,
 } from "../services/gamificacaoService";
 import {
@@ -40,6 +41,11 @@ interface DiaCalendario {
   data: string;
   cor: string;
   diaSemana: string;
+}
+
+function formatarDataBr(dataStr: string): string {
+  const [ano, mes, dia] = dataStr.split("-");
+  return `${dia}/${mes}/${ano}`;
 }
 
 function addDiasStr(dataStr: string, dias: number): string {
@@ -76,21 +82,24 @@ export default function TelaProgresso() {
   });
   const [calendario, setCalendario] = useState<DiaCalendario[]>([]);
   const [passeDisponivel, setPasseDisponivel] = useState(false);
+  const [toastPasse, setToastPasse] = useState<string | null>(null);
 
   useEffect(() => {
     async function carregar() {
       await garantirMissoesDoDia(paciente.id);
       await verificarEConcederPasseLivre(paciente.id);
 
-      const { streakDias: streakAtualizado } = await atualizarStreak(
-        paciente.id,
-      );
+      const { streakDias: streakAtualizado, diasProtegidosAgora } =
+        await atualizarStreak(paciente.id);
       setStreakDias(streakAtualizado);
+
+      if (diasProtegidosAgora.length > 0) {
+        setToastPasse(formatarDataBr(diasProtegidosAgora[0]));
+        setTimeout(() => setToastPasse(null), 5000);
+      }
 
       const disponivel = await passeLivreDisponivel(paciente.id);
       setPasseDisponivel(disponivel);
-
-      // ... resto do carregamento continua igual
 
       const hoje = dataHojeStr();
 
@@ -122,14 +131,19 @@ export default function TelaProgresso() {
 
       setHabitos(habitosCalc);
 
-      const dias: { data: string; cor: string; diaSemana: string }[] = [];
+      const diasProtegidosSet = await diasProtegidosPorPasse(paciente.id);
+
+      const dias: DiaCalendario[] = [];
       for (let i = 6; i >= 0; i--) {
         const dia = addDiasStr(hoje, -i);
         const { percentual, totalPlanejadas } = await calcularCumprimentoDia(
           paciente.id,
           dia,
         );
-        const cor = corDoDia(totalPlanejadas, percentual);
+        let cor: string = corDoDia(totalPlanejadas, percentual);
+        if (cor === "vermelho" && diasProtegidosSet.has(dia)) {
+          cor = "protegido";
+        }
         const diaSemana = DIAS_SEMANA[new Date(dia + "T00:00:00Z").getUTCDay()];
         dias.push({ data: dia, cor, diaSemana });
       }
@@ -160,6 +174,16 @@ export default function TelaProgresso() {
 
   return (
     <div className="min-h-screen bg-gray-50 pb-24">
+      {toastPasse && (
+        <div
+          className="fixed top-4 left-1/2 -translate-x-1/2 z-50
+          bg-green-500 text-white px-5 py-3 rounded-full shadow-lg
+          font-bold text-sm text-center max-w-[90vw]"
+        >
+          🍀 Seu passe livre protegeu sua sequência no dia {toastPasse}!
+        </div>
+      )}
+
       {/* Header */}
       <div className="bg-linear-to-b from-green-600 to-green-500 px-5 pt-12 pb-6 text-white">
         <div className="flex items-center gap-4">
@@ -275,9 +299,19 @@ export default function TelaProgresso() {
           <div className="flex justify-between">
             {calendario.map((dia) => (
               <div key={dia.data} className="flex flex-col items-center gap-2">
-                <div
-                  className={`w-8 h-8 rounded-full ${CORES_CALENDARIO[dia.cor]}`}
-                />
+                {dia.cor === "protegido" ? (
+                  <div
+                    className="w-8 h-8 rounded-full bg-green-50 border-2 border-green-300
+                      flex items-center justify-center text-sm"
+                    title="Protegido por Passe Livre"
+                  >
+                    🍀
+                  </div>
+                ) : (
+                  <div
+                    className={`w-8 h-8 rounded-full ${CORES_CALENDARIO[dia.cor]}`}
+                  />
+                )}
                 <span className="text-xs text-gray-400">{dia.diaSemana}</span>
               </div>
             ))}

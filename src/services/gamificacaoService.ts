@@ -160,16 +160,20 @@ export async function contarPassesUsadosNaJornada(
 // ── Streak (sequência) ─────────────────────────────────
 const MAX_DIAS_RETROSPECTO = 90;
 
-export async function atualizarStreak(
-  pacienteId: string,
-): Promise<{ streakDias: number; streakMaior: number }> {
+export async function atualizarStreak(pacienteId: string): Promise<{
+  streakDias: number;
+  streakMaior: number;
+  diasProtegidosAgora: string[]; // ← novo
+}> {
   const { data: pacienteRow } = await supabase
     .from("pacientes")
     .select("jornada_data_inicio, created_at, streak_maior")
     .eq("id", pacienteId)
     .single();
 
-  if (!pacienteRow) return { streakDias: 0, streakMaior: 0 };
+  if (!pacienteRow) {
+    return { streakDias: 0, streakMaior: 0, diasProtegidosAgora: [] };
+  }
 
   const hoje = dataHojeStr();
   const ontem = addDiasStr(hoje, -1);
@@ -181,7 +185,6 @@ export async function atualizarStreak(
     limiteMinimo;
   if (limite < limiteMinimo) limite = limiteMinimo;
 
-  // Total de refeições ativas no plano (mesma regra usada em calcularCumprimentoDia)
   const { data: plano } = await supabase
     .from("refeicoes_plano")
     .select("opcoes")
@@ -196,10 +199,13 @@ export async function atualizarStreak(
   ).length;
 
   if (totalPlanejadas === 0) {
-    return { streakDias: 0, streakMaior: pacienteRow.streak_maior ?? 0 };
+    return {
+      streakDias: 0,
+      streakMaior: pacienteRow.streak_maior ?? 0,
+      diasProtegidosAgora: [],
+    };
   }
 
-  // Uma única query pra todo o intervalo, em vez de uma por dia
   const { data: registros } = await supabase
     .from("refeicoes_registradas")
     .select("data")
@@ -224,6 +230,7 @@ export async function atualizarStreak(
 
   let streak = 0;
   let cursor = ontem;
+  const diasProtegidosAgora: string[] = []; // ← novo
 
   while (cursor >= limite) {
     const feitas = contagemPorDia.get(cursor) ?? 0;
@@ -235,8 +242,9 @@ export async function atualizarStreak(
       const protegido = await consumirPasseLivre(pacienteId, cursor);
       if (protegido) {
         streak += 1;
+        diasProtegidosAgora.push(cursor); // ← novo
       } else {
-        break; // sequência quebra aqui
+        break;
       }
     }
 
@@ -254,7 +262,21 @@ export async function atualizarStreak(
     })
     .eq("id", pacienteId);
 
-  return { streakDias: streak, streakMaior: maiorFinal };
+  return { streakDias: streak, streakMaior: maiorFinal, diasProtegidosAgora };
+}
+
+export async function diasProtegidosPorPasse(
+  pacienteId: string,
+): Promise<Set<string>> {
+  const { data } = await supabase
+    .from("passes_livres")
+    .select("usado_em")
+    .eq("paciente_id", pacienteId)
+    .eq("usado", true);
+
+  return new Set(
+    (data ?? []).map((p) => p.usado_em).filter((d): d is string => !!d),
+  );
 }
 
 // ── Streak de missão  ──
