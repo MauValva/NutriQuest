@@ -163,17 +163,25 @@ const MAX_DIAS_RETROSPECTO = 90;
 export async function atualizarStreak(pacienteId: string): Promise<{
   streakDias: number;
   streakMaior: number;
-  diasProtegidosAgora: string[]; // ← novo
+  streakAnterior: number; // ← novo
+  diasProtegidosAgora: string[];
 }> {
   const { data: pacienteRow } = await supabase
     .from("pacientes")
-    .select("jornada_data_inicio, created_at, streak_maior")
+    .select("jornada_data_inicio, created_at, streak_maior, streak_dias")
     .eq("id", pacienteId)
     .single();
 
   if (!pacienteRow) {
-    return { streakDias: 0, streakMaior: 0, diasProtegidosAgora: [] };
+    return {
+      streakDias: 0,
+      streakMaior: 0,
+      streakAnterior: 0,
+      diasProtegidosAgora: [],
+    };
   }
+
+  const streakAnterior = pacienteRow.streak_dias ?? 0; // ← novo
 
   const hoje = dataHojeStr();
   const ontem = addDiasStr(hoje, -1);
@@ -202,6 +210,7 @@ export async function atualizarStreak(pacienteId: string): Promise<{
     return {
       streakDias: 0,
       streakMaior: pacienteRow.streak_maior ?? 0,
+      streakAnterior,
       diasProtegidosAgora: [],
     };
   }
@@ -230,19 +239,32 @@ export async function atualizarStreak(pacienteId: string): Promise<{
 
   let streak = 0;
   let cursor = ontem;
-  const diasProtegidosAgora: string[] = []; // ← novo
+  const diasProtegidosAgora: string[] = [];
 
   while (cursor >= limite) {
     const feitas = contagemPorDia.get(cursor) ?? 0;
     const percentual = feitas / totalPlanejadas;
+    const diaBom = percentual >= 0.5 || diasProtegidos.has(cursor);
 
-    if (percentual >= 0.5 || diasProtegidos.has(cursor)) {
+    if (diaBom) {
       streak += 1;
     } else {
+      // Espia o dia anterior — só usa o passe se for uma falha ISOLADA,
+      // nunca quando há 2+ dias seguidos sem registro suficiente.
+      const diaAnterior = addDiasStr(cursor, -1);
+      const feitasAnterior = contagemPorDia.get(diaAnterior) ?? 0;
+      const percentualAnterior = feitasAnterior / totalPlanejadas;
+      const diaAnteriorBom =
+        percentualAnterior >= 0.5 || diasProtegidos.has(diaAnterior);
+
+      if (!diaAnteriorBom) {
+        break; // 2+ dias seguidos ruins — sequência quebra aqui, sem gastar passe
+      }
+
       const protegido = await consumirPasseLivre(pacienteId, cursor);
       if (protegido) {
         streak += 1;
-        diasProtegidosAgora.push(cursor); // ← novo
+        diasProtegidosAgora.push(cursor);
       } else {
         break;
       }
@@ -262,7 +284,12 @@ export async function atualizarStreak(pacienteId: string): Promise<{
     })
     .eq("id", pacienteId);
 
-  return { streakDias: streak, streakMaior: maiorFinal, diasProtegidosAgora };
+  return {
+    streakDias: streak,
+    streakMaior: maiorFinal,
+    streakAnterior,
+    diasProtegidosAgora,
+  };
 }
 
 export async function diasProtegidosPorPasse(

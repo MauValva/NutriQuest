@@ -23,6 +23,7 @@ export function AppProvider({
     <AppContext.Provider
       value={{
         streakDias,
+        setStreakDias,
         nomeUsuario,
         paciente,
         setNomeUsuario,

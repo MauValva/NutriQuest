@@ -12,6 +12,8 @@ import {
 } from "../services/pacienteService";
 
 import { supabase } from "../lib/supabase";
+import { calcularCumprimentoDia } from "../services/gamificacaoService";
+import ModalCelebracao from "../components/ModalCelebracao";
 
 type TipoRefeicao =
   | "cafe"
@@ -166,6 +168,8 @@ function formatarDica(texto: string): { titulo?: string; conteudo: string }[] {
 }
 
 export default function TelaRefeicoes() {
+  const [modalStreak, setModalStreak] = useState(false);
+  const [streakPreview, setStreakPreview] = useState(0);
   const { paciente } = useApp();
   const [abaAtiva, setAbaAtiva] = useState<TipoRefeicao>("cafe");
   const [plano, setPlano] = useState<RefeicaoPlano[]>([]);
@@ -335,19 +339,41 @@ export default function TelaRefeicoes() {
     );
   }
 
+  async function verificarCelebracaoStreak(antesRegistro: () => Promise<void>) {
+    if (dataSelecionadaStr !== dataHojeStr()) {
+      await antesRegistro();
+      return;
+    }
+
+    const antes = await calcularCumprimentoDia(paciente.id, dataSelecionadaStr);
+    await antesRegistro();
+    const depois = await calcularCumprimentoDia(
+      paciente.id,
+      dataSelecionadaStr,
+    );
+
+    if (antes.percentual < 0.5 && depois.percentual >= 0.5) {
+      setStreakPreview((paciente.streak_dias ?? 0) + 1);
+      setModalStreak(true);
+    }
+  }
+
   async function concluirOpcao(opcaoIdx: number) {
     if (!refeicaoAtiva) return;
     const opcao = refeicaoAtiva.opcoes[opcaoIdx];
     const observacao = observacaoPorOpcao[opcaoIdx] ?? "";
 
-    const sucesso = await registrarRefeicaoConfirmada(
-      paciente.id,
-      abaAtiva,
-      opcao.numero,
-      refeicaoAtiva.pontosBase,
-      observacao,
-      dataSelecionadaStr,
-    );
+    let sucesso = false;
+    await verificarCelebracaoStreak(async () => {
+      sucesso = await registrarRefeicaoConfirmada(
+        paciente.id,
+        abaAtiva,
+        opcao.numero,
+        refeicaoAtiva.pontosBase,
+        observacao,
+        dataSelecionadaStr,
+      );
+    });
 
     if (sucesso) {
       const tipoConclusao = observacao.trim() ? "parcial" : "completa";
@@ -387,13 +413,16 @@ export default function TelaRefeicoes() {
     if (!textoExtra.trim() || !refeicaoAtiva) return;
     setEnviandoExtra(true);
 
-    const sucesso = await registrarRefeicaoExtra(
-      paciente.id,
-      abaAtiva,
-      refeicaoAtiva.pontosBase,
-      textoExtra,
-      dataSelecionadaStr,
-    );
+    let sucesso = false;
+    await verificarCelebracaoStreak(async () => {
+      sucesso = await registrarRefeicaoExtra(
+        paciente.id,
+        abaAtiva,
+        refeicaoAtiva.pontosBase,
+        textoExtra,
+        dataSelecionadaStr,
+      );
+    });
 
     if (sucesso) {
       setRegistrosPorDia((prev) => ({
@@ -993,6 +1022,14 @@ export default function TelaRefeicoes() {
                 </div>
               </div>
             </div>
+          )}
+
+          {modalStreak && (
+            <ModalCelebracao
+              tipo="streak"
+              dias={streakPreview}
+              onFechar={() => setModalStreak(false)}
+            />
           )}
         </div>
       </div>

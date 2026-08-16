@@ -12,6 +12,7 @@ import {
   estaDesbloqueada,
   type StatsConquistas,
 } from "../services/gamificacaoService";
+import ModalCelebracao from "../components/ModalCelebracao";
 
 export default function TelaMissoes() {
   const { paciente } = useApp();
@@ -19,6 +20,7 @@ export default function TelaMissoes() {
   const [carregando, setCarregando] = useState(true);
   const [celebrando, setCelebrando] = useState(false);
   const [stats, setStats] = useState<StatsConquistas | null>(null);
+  const [modalTodasConcluidas, setModalTodasConcluidas] = useState(false);
 
   useEffect(() => {
     async function carregar() {
@@ -47,9 +49,17 @@ export default function TelaMissoes() {
     const missao = missoes.find((m) => m.id === id);
     if (!missao || missao.concluida) return;
 
-    setMissoes((prev) =>
-      prev.map((m) => (m.id === id ? { ...m, concluida: true } : m)),
+    const atualizadas = missoes.map((m) =>
+      m.id === id ? { ...m, concluida: true } : m,
     );
+    setMissoes(atualizadas);
+
+    const todasConcluidas =
+      atualizadas.length > 0 && atualizadas.every((m) => m.concluida);
+    if (todasConcluidas) {
+      setModalTodasConcluidas(true);
+    }
+
     setCelebrando(true);
     setTimeout(() => setCelebrando(false), 2000);
 
@@ -191,6 +201,13 @@ export default function TelaMissoes() {
                 </div>
               );
             },
+          )}
+
+          {modalTodasConcluidas && (
+            <ModalCelebracao
+              tipo="missoes"
+              onFechar={() => setModalTodasConcluidas(false)}
+            />
           )}
         </div>
       </div>

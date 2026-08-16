@@ -20,6 +20,7 @@ import {
   garantirMissoesDoDia,
   buscarMissoesDoDia,
 } from "../services/missoesService";
+import ModalCelebracao from "../components/ModalCelebracao";
 
 const LABELS_REFEICAO: Record<string, { label: string; icone: string }> = {
   cafe: { label: "Café", icone: "🌅" },
@@ -43,11 +44,6 @@ interface DiaCalendario {
   diaSemana: string;
 }
 
-function formatarDataBr(dataStr: string): string {
-  const [ano, mes, dia] = dataStr.split("-");
-  return `${dia}/${mes}/${ano}`;
-}
-
 function addDiasStr(dataStr: string, dias: number): string {
   const d = new Date(dataStr + "T00:00:00Z");
   d.setUTCDate(d.getUTCDate() + dias);
@@ -69,9 +65,8 @@ const HABITOS_CONFIG = [
 ];
 
 export default function TelaProgresso() {
-  const { paciente } = useApp();
   const [carregando, setCarregando] = useState(true);
-  const [streakDias, setStreakDias] = useState(0);
+  const { paciente, streakDias, setStreakDias } = useApp();
   const [refeicoesHoje, setRefeicoesHoje] = useState<RefeicaoHojeStatus[]>([]);
   const [missoesHoje, setMissoesHoje] = useState({ total: 0, concluidas: 0 });
   const [habitos, setHabitos] = useState<Habitos>({
@@ -82,20 +77,27 @@ export default function TelaProgresso() {
   });
   const [calendario, setCalendario] = useState<DiaCalendario[]>([]);
   const [passeDisponivel, setPasseDisponivel] = useState(false);
-  const [toastPasse, setToastPasse] = useState<string | null>(null);
+  const [modalAtivo, setModalAtivo] = useState<{
+    tipo: "passe" | "perdido";
+    dataProtegida?: string;
+  } | null>(null);
 
   useEffect(() => {
     async function carregar() {
       await garantirMissoesDoDia(paciente.id);
       await verificarEConcederPasseLivre(paciente.id);
 
-      const { streakDias: streakAtualizado, diasProtegidosAgora } =
-        await atualizarStreak(paciente.id);
+      const {
+        streakDias: streakAtualizado,
+        streakAnterior,
+        diasProtegidosAgora,
+      } = await atualizarStreak(paciente.id);
       setStreakDias(streakAtualizado);
 
       if (diasProtegidosAgora.length > 0) {
-        setToastPasse(formatarDataBr(diasProtegidosAgora[0]));
-        setTimeout(() => setToastPasse(null), 5000);
+        setModalAtivo({ tipo: "passe", dataProtegida: diasProtegidosAgora[0] });
+      } else if (streakAnterior > 0 && streakAtualizado === 0) {
+        setModalAtivo({ tipo: "perdido" });
       }
 
       const disponivel = await passeLivreDisponivel(paciente.id);
@@ -174,14 +176,12 @@ export default function TelaProgresso() {
 
   return (
     <div className="min-h-screen bg-gray-50 pb-24">
-      {toastPasse && (
-        <div
-          className="fixed top-4 left-1/2 -translate-x-1/2 z-50
-          bg-green-500 text-white px-5 py-3 rounded-full shadow-lg
-          font-bold text-sm text-center max-w-[90vw]"
-        >
-          🍀 Seu passe livre protegeu sua sequência no dia {toastPasse}!
-        </div>
+      {modalAtivo && (
+        <ModalCelebracao
+          tipo={modalAtivo.tipo}
+          dataProtegida={modalAtivo.dataProtegida}
+          onFechar={() => setModalAtivo(null)}
+        />
       )}
 
       {/* Header */}

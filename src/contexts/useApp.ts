@@ -3,6 +3,7 @@ import type { Paciente } from "../lib/supabase";
 
 interface AppState {
   streakDias: number;
+  setStreakDias: (dias: number) => void;
   nomeUsuario: string;
   paciente: Paciente;
   setNomeUsuario: (nome: string) => void;
