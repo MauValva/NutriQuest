@@ -1,5 +1,5 @@
 interface Props {
-  tipo: "streak" | "passe" | "perdido";
+  tipo: "streak" | "passe" | "perdido" | "missoes";
   dias?: number;
   dataProtegida?: string;
   onFechar: () => void;
@@ -52,7 +52,7 @@ export default function ModalCelebracao({
 
   return (
     <div
-      className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center px-6"
+      className="fixed inset-0 bg-black/60 z-100 flex items-center justify-center px-6"
       onClick={onFechar}
     >
       <div
